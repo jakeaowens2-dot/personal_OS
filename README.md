@@ -1,0 +1,52 @@
+# Productivity OS
+
+A personal productivity operating system built around a Pomodoro timer, a work-block ledger, and a reward-spending loop.
+
+## Stack
+
+- Next.js App Router
+- React
+- TypeScript
+- Tailwind CSS
+- Supabase
+- Vercel Hobby
+
+## Core MVP
+
+The MVP is not a generic task app. It is a work/reward system.
+
+A completed Pomodoro creates a timestamped work block. Work blocks are stored in a durable ledger and can be spent on reward blocks. The app should make productivity visible without turning the interface into a noisy backlog.
+
+## Repo Context
+
+Read these files before working:
+
+- `AGENTS.md` — agent behavior, engineering rules, and token economy rules.
+- `CODEMAP.md` — where important code lives.
+- `docs/PRODUCT_SPEC.md` — product scope, architecture, data model, UI behavior.
+- `docs/TASKS.md` — phased rollout and task-by-task implementation plan.
+
+## Development
+
+Initial setup target:
+
+```bash
+npx create-next-app@latest productivity-os \
+  --typescript \
+  --tailwind \
+  --eslint \
+  --app \
+  --src-dir
+```
+
+Add Supabase client:
+
+```bash
+npm install @supabase/supabase-js
+```
+
+## Current Phase
+
+Start with Phase 0 and Phase 1 in `docs/TASKS.md`.
+
+Do not build AI brief, notification nudges, calendar/email integrations, or SMS until the timer-ledger-rewards loop works.
