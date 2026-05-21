@@ -1,0 +1,30 @@
+{
+  "name": "productivity-os-v1",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "next typegen && tsc --noEmit -p tsconfig.typecheck.json"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.10.3",
+    "@supabase/supabase-js": "^2.106.1",
+    "next": "*",
+    "react": "*",
+    "react-dom": "*"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "*",
+    "@types/node": "*",
+    "@types/react": "*",
+    "@types/react-dom": "*",
+    "eslint": "*",
+    "eslint-config-next": "*",
+    "postcss": "*",
+    "tailwindcss": "*",
+    "typescript": "*"
+  }
+}

@@ -13,7 +13,9 @@ When a task is completed:
 
 ### 0.1 Create Next.js project
 
-Status: Not started
+Status: Complete
+
+Note: Added a root-level Next.js App Router scaffold with TypeScript, Tailwind, ESLint, `src/app`, and verified with `npm run lint`, `npm run typecheck`, `npm run build -- --webpack`, and a successful `npm run dev` startup.
 
 Create the app using:
 - Next.js App Router
@@ -30,7 +32,9 @@ Acceptance criteria:
 
 ### 0.2 Add base repo docs
 
-Status: Not started
+Status: Complete
+
+Note: Confirmed `AGENTS.md`, `README.md`, `CODEMAP.md`, `docs/PRODUCT_SPEC.md`, and `docs/TASKS.md` at repo root/docs and updated the code map to reflect the live scaffold structure.
 
 Add:
 - `AGENTS.md`
@@ -46,7 +50,9 @@ Acceptance criteria:
 
 ### 0.3 Add base UI primitives
 
-Status: Not started
+Status: Complete
+
+Note: Added typed `Button`, `Card`, `Badge`, and `StatCard` primitives under `src/components/ui`, refactored the home page to use them, and verified with `npm run lint`, `npm run typecheck`, and `npm run build -- --webpack`.
 
 Create:
 - `Button`
@@ -63,7 +69,9 @@ Acceptance criteria:
 
 ### 1.1 Build Pomodoro timer UI
 
-Status: Not started
+Status: Complete
+
+Note: Added the Pomodoro timer UI with work, break, and long-break modes, start/pause/reset controls, countdown progress, and visible completion state using `src/components/timer/*` and `src/lib/timer.ts`. Verified with `npm run lint`, `npm run typecheck`, `npm run build -- --webpack`, and a live local preview via `npm run dev`.
 
 Create a timer with:
 - Work mode.
@@ -82,7 +90,9 @@ Acceptance criteria:
 
 ### 1.2 Add timer domain types
 
-Status: Not started
+Status: Complete
+
+Note: Added shared `TimerMode`, `TimerSession`, `WorkBlock`, and `LedgerEvent` types in `src/lib/types.ts`, updated timer helpers/components to consume the shared timer mode type, and stabilized `tsconfig.json` so `npm run typecheck` no longer depends on generated `.next` artifacts. Verified with `npm run lint`, `npm run typecheck`, and the existing successful `npm run build -- --webpack`.
 
 Define shared TypeScript types for:
 - Timer mode.
@@ -97,7 +107,9 @@ Acceptance criteria:
 
 ### 1.3 Add local completion handling
 
-Status: Not started
+Status: Complete
+
+Note: Work-mode timer completions now create in-memory `TimerSession`, `WorkBlock`, and `LedgerEvent` records through `src/lib/ledger.ts`, and the dashboard surfaces today’s work-block count plus a local ledger event list. Verified with `npm run lint`, `npm run typecheck`, `npm run build -- --webpack`, and the live preview on `http://localhost:3000`.
 
 When a work timer completes, create an in-memory work block and ledger event.
 
@@ -106,11 +118,25 @@ Acceptance criteria:
 - Ledger list shows a work-earned event.
 - Refresh persistence is not required yet.
 
+### 1.4 Redesign home timer workspace
+
+Status: Complete
+
+Note: Redesigned the home screen into a unified single-workspace layout with a large central timer, integrated mode/status treatment, a quiet horizontal status strip, and softer local activity panels. Verified with `npm run lint`, `npm run typecheck`, `npm run build -- --webpack`, and the live preview on `http://localhost:3000`.
+
+Acceptance criteria:
+- Home screen feels like a single unified workspace, not a card dashboard.
+- Timer is the clear visual focal point.
+- Changing mode changes the timer accent/color treatment.
+- Supporting stats are present but visually quiet.
+
 ## Phase 2 — Supabase Persistence
 
 ### 2.1 Add Supabase client
 
-Status: Not started
+Status: Complete
+
+Note: Installed `@supabase/supabase-js`, added the isolated client helper in `src/lib/supabase.ts`, documented `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `README.md`, and added `.env.example` with the expected variable names. Verified with `npm run lint` and `npm run typecheck`.
 
 Install and configure Supabase client.
 
@@ -121,7 +147,9 @@ Acceptance criteria:
 
 ### 2.2 Create database schema migration
 
-Status: Not started
+Status: Complete
+
+Note: Added the initial Supabase migration at `supabase/migrations/20260520233500_initial_schema.sql` with MVP tables for `timer_sessions`, `work_blocks`, `ledger_events`, `reward_rules`, and `reward_redemptions`, including `user_id` fields, timestamps, foreign keys, and practical indexes. Verified with `npm run lint` and `npm run typecheck`.
 
 Create tables for:
 - `timer_sessions`
@@ -137,7 +165,9 @@ Acceptance criteria:
 
 ### 2.3 Persist completed Pomodoro
 
-Status: Not started
+Status: Complete
+
+Note: Wired completed work sessions to Supabase persistence using the browser client, anonymous workspace session bootstrap, initial workspace data loading, visible sync/save status messaging, and duplicate-write protection keyed to each completion event. Completed work sessions now upsert a timer session, work block, and ledger event, and saved data reloads on refresh. Verified with `npm run lint` and `npm run typecheck`.
 
 On completed work session, write:
 - Timer session.

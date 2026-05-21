@@ -42,11 +42,25 @@ npx create-next-app@latest productivity-os \
 Add Supabase client:
 
 ```bash
-npm install @supabase/supabase-js
+npm install @supabase/supabase-js @supabase/ssr
 ```
+
+## Environment
+
+Add these variables in local development and in your deployment environment:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=your-project-url
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-publishable-key
+```
+
+Notes:
+- These are public client-safe values and are the only Supabase values the current app should use.
+- Do not expose a service-role key to client components.
+- `.env.example` shows the expected variable names, and `.env.local` can hold your local values.
 
 ## Current Phase
 
-Start with Phase 0 and Phase 1 in `docs/TASKS.md`.
+Start with Phase 0 through Phase 2 in `docs/TASKS.md`.
 
 Do not build AI brief, notification nudges, calendar/email integrations, or SMS until the timer-ledger-rewards loop works.

@@ -6,13 +6,54 @@ Keep it short. Its purpose is to help agents find the right files without scanni
 
 Update this file whenever important files or directories are added, moved, deleted, or substantially repurposed.
 
-## Current State
+## Current Structure
 
-The repository may not be scaffolded yet.
+```txt
+src/
+  app/
+    globals.css
+    layout.tsx
+    page.tsx
+  components/
+    timer/
+      PomodoroTimer.tsx
+      TimerControls.tsx
+      TimerModeTabs.tsx
+    ui/
+      Badge.tsx
+      Button.tsx
+      Card.tsx
+      StatCard.tsx
+  lib/
+    cn.ts
+    ledger.ts
+    supabase/
+      client.ts
+      middleware.ts
+      server.ts
+    workspace.ts
+    timer.ts
+    types.ts
+  proxy.ts
 
-Once the Next.js project is created, use the structure below.
+.gitignore
+eslint.config.mjs
+next.config.ts
+package.json
+postcss.config.mjs
+tsconfig.json
+tsconfig.typecheck.json
 
-## Expected Structure
+docs/
+  PRODUCT_SPEC.md
+  TASKS.md
+
+supabase/
+  migrations/
+    20260520233500_initial_schema.sql
+```
+
+## Planned Structure
 
 ```txt
 src/
@@ -79,7 +120,7 @@ Read:
 
 ### Timer UI
 
-Expected files:
+Current files:
 - `src/components/timer/PomodoroTimer.tsx`
 - `src/components/timer/TimerControls.tsx`
 - `src/components/timer/TimerModeTabs.tsx`
@@ -87,14 +128,18 @@ Expected files:
 
 ### Ledger behavior
 
-Expected files:
+Current file:
+- `src/lib/ledger.ts`
+- `src/lib/workspace.ts` handles Supabase-backed workspace session bootstrap, loading, and completion persistence.
+
+Planned files:
 - `src/lib/ledger.ts`
 - `src/components/ledger/LedgerEventList.tsx`
 - `src/components/ledger/WorkBlockStats.tsx`
 
 ### Rewards
 
-Expected files:
+Planned files:
 - `src/lib/rewards.ts`
 - `src/components/rewards/RewardBalance.tsx`
 - `src/components/rewards/RewardCatalog.tsx`
@@ -102,22 +147,49 @@ Expected files:
 
 ### Shared types
 
-Expected file:
+Current file:
 - `src/lib/types.ts`
+
+### Shared UI helpers
+
+Current file:
+- `src/lib/cn.ts`
 
 ### Supabase
 
-Expected files:
-- `src/lib/supabase.ts`
+Current files:
+- `src/lib/supabase/client.ts`
+- `src/lib/supabase/server.ts`
+- `src/lib/supabase/middleware.ts`
+- `src/proxy.ts`
+
+Planned files:
 - `supabase/migrations/*`
 
 ### UI primitives
 
-Expected files:
+Current files:
 - `src/components/ui/Button.tsx`
 - `src/components/ui/Card.tsx`
 - `src/components/ui/Badge.tsx`
 - `src/components/ui/StatCard.tsx`
+
+### App shell
+
+Current files:
+- `src/app/layout.tsx`
+- `src/app/page.tsx`
+- `src/app/globals.css`
+
+### Project config
+
+Current files:
+- `package.json`
+- `tsconfig.json`
+- `tsconfig.typecheck.json`
+- `next.config.ts`
+- `postcss.config.mjs`
+- `eslint.config.mjs`
 
 ### AI brief, later phase only
 
