@@ -166,6 +166,8 @@ Home overview behavior:
 - Show only the information needed to understand the current state at a glance.
 - Secondary actions such as manual corrections or reward spending should stay visually subtle and appear only when needed.
 - Deeper explanation, browsing, and verbose metadata belong in expanded surfaces or later dedicated routes, not in the default overview.
+- Overview modules that appear side-by-side must share a common page grid and a common internal section skeleton for header, body, and footer alignment.
+- Do not hand-position neighboring overview sections independently with one-off flex alignment rules. Extend the shared layout primitive instead.
 
 The MVP dashboard should stay sparse:
 - Timer

@@ -17,6 +17,8 @@ src/
   components/
     ledger/
       LedgerEventList.tsx
+    overview/
+      OverviewModule.tsx
     timer/
       PomodoroTimer.tsx
       TimerControls.tsx
@@ -162,6 +164,12 @@ Current file:
 
 Current file:
 - `src/lib/cn.ts`
+
+### Overview layout
+
+Current files:
+- `src/components/overview/OverviewModule.tsx`
+- `src/app/page.tsx` uses the shared overview module/grid so neighboring sections align across the page.
 
 ### Supabase
 

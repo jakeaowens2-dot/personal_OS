@@ -1,8 +1,8 @@
 import type { ButtonHTMLAttributes } from "react";
 import { cn } from "@/lib/cn";
 
-type ButtonVariant = "primary" | "secondary" | "ghost";
-type ButtonSize = "sm" | "md";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "text";
+type ButtonSize = "sm" | "md" | "inline";
 
 export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: ButtonVariant;
@@ -15,11 +15,13 @@ const variantClasses: Record<ButtonVariant, string> = {
   secondary:
     "border border-[var(--border)] bg-white text-slate-900 hover:bg-slate-50",
   ghost: "bg-transparent text-[var(--accent)] hover:bg-[var(--accent-soft)]/70",
+  text: "bg-transparent text-[var(--accent)] hover:text-[#0f6b6d] hover:underline hover:decoration-current hover:underline-offset-4",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
   sm: "h-10 px-4 text-sm",
   md: "h-12 px-5 text-sm",
+  inline: "h-auto px-0 py-0 text-sm",
 };
 
 export function Button({
@@ -33,6 +35,7 @@ export function Button({
     <button
       className={cn(
         "inline-flex items-center justify-center rounded-xl font-medium transition-[background-color,color,box-shadow,transform] duration-200 ease-out hover:-translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]/40 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:opacity-60",
+        variant === "text" ? "rounded-none hover:translate-y-0" : null,
         variantClasses[variant],
         sizeClasses[size],
         className,

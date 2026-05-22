@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 import { LedgerEventList } from "@/components/ledger/LedgerEventList";
+import { OverviewModule } from "@/components/overview/OverviewModule";
 import { PomodoroTimer, type TimerStatus } from "@/components/timer/PomodoroTimer";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -118,6 +119,45 @@ function formatRewardMinutes(totalMinutes: number) {
   return `${prefix}${hours}:${minutes.toString().padStart(2, "0")}`;
 }
 
+function formatDurationLabel(hours: number, minutes: number) {
+  const parts = [];
+
+  if (hours > 0) {
+    parts.push(`${hours}h`);
+  }
+
+  if (minutes > 0 || parts.length === 0) {
+    parts.push(`${minutes}m`);
+  }
+
+  return parts.join(" ");
+}
+
+function getRewardReportDate(dayOffset: number) {
+  const date = new Date();
+  // Reward reports currently capture the day only, so we normalize to local midday
+  // to persist a stable, non-edge-case timestamp for that calendar date.
+  date.setHours(12, 0, 0, 0);
+  date.setDate(date.getDate() + dayOffset);
+  return date;
+}
+
+function formatRewardReportDate(dayOffset: number) {
+  if (dayOffset === 0) {
+    return "Today";
+  }
+
+  if (dayOffset === -1) {
+    return "Yesterday";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(getRewardReportDate(dayOffset));
+}
+
 type ActionFieldProps = {
   label: string;
 } & InputHTMLAttributes<HTMLInputElement>;
@@ -164,7 +204,7 @@ function BlockMeter({
   return (
     <div className="space-y-3">
       {label ? <p className="text-sm text-slate-500">{label}</p> : null}
-      <div className="flex min-h-4 flex-wrap gap-2">
+      <div className="flex min-h-4 flex-wrap gap-[2px]">
         {count === 0 ? (
           <div className="text-xs text-slate-400">{zeroLabel}</div>
         ) : (
@@ -172,14 +212,15 @@ function BlockMeter({
             const fillRatio = partialCount == null
               ? 1
               : Math.max(0, Math.min(1, partialCount - index));
+            const isGroupBoundary = index > 0 && index % 3 === 0;
 
             return (
               <span
                 key={`${label}-${index}`}
-                className="relative h-3.5 w-3.5 overflow-hidden rounded-[4px] bg-slate-200/80"
+                className={`relative h-[15px] w-[15px] overflow-hidden rounded-[2px] bg-slate-200/80 ${isGroupBoundary ? "ml-[9px]" : ""}`}
               >
                 <span
-                  className="absolute inset-y-0 left-0 rounded-[4px]"
+                  className="absolute inset-y-0 left-0 rounded-[2px]"
                   style={{
                     backgroundColor: palette,
                     width: `${fillRatio * 100}%`,
@@ -193,34 +234,6 @@ function BlockMeter({
       </div>
       {valueLabel ? <p className="text-sm font-semibold text-slate-900">{valueLabel}</p> : null}
     </div>
-  );
-}
-
-type OverviewSectionProps = {
-  actionLabel?: string;
-  children: ReactNode;
-  headerAdornment?: ReactNode;
-  onAction?: () => void;
-  title: string;
-};
-
-function OverviewSection({ actionLabel, children, headerAdornment, onAction, title }: OverviewSectionProps) {
-  return (
-    <section className="space-y-5">
-      <div aria-hidden="true" className="h-px w-14 bg-slate-300/80" />
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <h2 className="text-base font-semibold text-slate-950">{title}</h2>
-          {headerAdornment}
-        </div>
-        {actionLabel && onAction ? (
-          <Button onClick={onAction} size="sm" variant="ghost">
-            {actionLabel}
-          </Button>
-        ) : null}
-      </div>
-      {children}
-    </section>
   );
 }
 
@@ -243,8 +256,9 @@ export default function HomePage() {
   const [manualWorkNote, setManualWorkNote] = useState("");
   const [isManualDialogOpen, setIsManualDialogOpen] = useState(false);
   const [isRewardDialogOpen, setIsRewardDialogOpen] = useState(false);
-  const [rewardMinutes, setRewardMinutes] = useState("30");
-  const [rewardName, setRewardName] = useState("Walk");
+  const [rewardHours, setRewardHours] = useState("0");
+  const [rewardMinutes, setRewardMinutes] = useState("0");
+  const [rewardDayOffset, setRewardDayOffset] = useState(0);
   const [rewardNote, setRewardNote] = useState("");
   const handledCompletionKeysRef = useRef(new Set<string>());
 
@@ -498,7 +512,10 @@ export default function HomePage() {
   };
 
   const handleRewardSpend = async () => {
-    const redeemMinutes = Number.parseInt(rewardMinutes, 10);
+    const redeemHours = Number.parseInt(rewardHours, 10);
+    const redeemMinutePortion = Number.parseInt(rewardMinutes, 10);
+    const redeemMinutes = (Number.isFinite(redeemHours) ? redeemHours : 0) * 60 +
+      (Number.isFinite(redeemMinutePortion) ? redeemMinutePortion : 0);
     const derivedCostWorkBlocks = Math.max(
       1,
       Math.ceil(redeemMinutes / WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK),
@@ -508,14 +525,6 @@ export default function HomePage() {
       setPersistenceState({
         kind: "error",
         message: "Workspace is not connected yet. Wait for the connection to finish before spending rewards.",
-      });
-      return;
-    }
-
-    if (!rewardName.trim()) {
-      setPersistenceState({
-        kind: "error",
-        message: "Reward name is required.",
       });
       return;
     }
@@ -537,9 +546,9 @@ export default function HomePage() {
       const { ledgerEvent } = await persistRewardSpend(supabase, {
         costWorkBlocks: derivedCostWorkBlocks,
         notes: rewardNote,
-        redeemedAt: new Date().toISOString(),
+        redeemedAt: getRewardReportDate(rewardDayOffset).toISOString(),
         rewardMinutes: redeemMinutes,
-        rewardName,
+        rewardName: `${formatDurationLabel(redeemHours, redeemMinutePortion)} reward block`,
         userId: workspaceUserId,
       });
 
@@ -547,7 +556,10 @@ export default function HomePage() {
         ...current,
         ledgerEvents: [ledgerEvent, ...current.ledgerEvents],
       }));
+      setRewardHours("0");
+      setRewardMinutes("0");
       setRewardNote("");
+      setRewardDayOffset(0);
       setIsRewardDialogOpen(false);
       setPersistenceState({
         kind: "saved",
@@ -588,73 +600,83 @@ export default function HomePage() {
           onStateChange={setTimerVisualState}
         />
 
-        <section className="grid gap-10 pt-2 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
-          <section className="grid gap-8 md:grid-cols-2 md:gap-10">
-            <section className="space-y-5">
-              <div aria-hidden="true" className="h-px w-14 bg-slate-300/80" />
-              <div className="flex items-start justify-between gap-4">
-                <h2 className="text-base font-semibold text-slate-950">Today&apos;s work</h2>
-                <div className="flex flex-col items-end gap-1">
-                  <p className="text-sm font-semibold text-slate-950">
-                    {todaysWorkBlocks.length} block{todaysWorkBlocks.length === 1 ? "" : "s"}
-                  </p>
-                  <Button onClick={() => setIsManualDialogOpen(true)} size="sm" variant="ghost">
+        <section className="grid gap-6 pt-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_22rem] lg:items-start">
+          <section className="lg:col-span-2 rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
+            <div className="grid gap-8 md:grid-cols-2 md:gap-0">
+              <OverviewModule
+                action={
+                  <Button onClick={() => setIsManualDialogOpen(true)} size="inline" variant="text">
                     Add manually
                   </Button>
-                </div>
-              </div>
-              <BlockMeter
-                color="work"
-                count={todaysWorkBlocks.length}
-                label=""
-                valueLabel=""
-                zeroLabel="No completed blocks yet"
+                }
+                body={
+                  <BlockMeter
+                    color="work"
+                    count={todaysWorkBlocks.length}
+                    label=""
+                    valueLabel=""
+                    zeroLabel="No completed blocks yet"
+                  />
+                }
+                className="md:pr-8"
+                footer={
+                  <p className="text-sm font-medium text-slate-500">
+                    {todaysWorkBlocks.length} block{todaysWorkBlocks.length === 1 ? "" : "s"}
+                  </p>
+                }
+                ruleStyle={{ backgroundColor: timerPalette.work.progress }}
+                title="Today&apos;s work"
               />
-            </section>
 
-            <section className="space-y-5">
-              <div aria-hidden="true" className="h-px w-14 bg-slate-300/80" />
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-center gap-3">
-                  <h2 className="text-base font-semibold text-slate-950">Reward balance</h2>
-                  {isWeekendBonusActive ? (
+              <OverviewModule
+                action={
+                  <Button onClick={() => setIsRewardDialogOpen(true)} size="inline" variant="text">
+                    Spend reward
+                  </Button>
+                }
+                badge={
+                  isWeekendBonusActive ? (
                     <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
                       {WEEKEND_REWARD_MULTIPLIER_LABEL}
                     </span>
-                  ) : null}
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <p className="text-sm font-semibold text-slate-950">
+                  ) : undefined
+                }
+                body={
+                  <BlockMeter
+                    color={currentRewardMinutes < 0 ? "reward_negative" : "reward"}
+                    count={Math.ceil(currentRewardBalance)}
+                    label=""
+                    partialCount={currentRewardBalance}
+                    valueLabel=""
+                    zeroLabel="No reward time yet"
+                  />
+                }
+                className="md:border-l md:border-slate-300/80 md:pl-8"
+                footer={
+                  <p className="text-sm font-medium text-slate-500">
                     {currentRewardMinutes < 0
                       ? `${formatRewardMinutes(currentRewardMinutes)} behind`
                       : `${formatRewardMinutes(currentRewardMinutes)} available`}
                   </p>
-                  <Button onClick={() => setIsRewardDialogOpen(true)} size="sm" variant="ghost">
-                    Spend reward
-                  </Button>
-                </div>
-              </div>
-              <BlockMeter
-                color={currentRewardMinutes < 0 ? "reward_negative" : "reward"}
-                count={Math.ceil(currentRewardBalance)}
-                label=""
-                partialCount={currentRewardBalance}
-                valueLabel=""
-                zeroLabel="No reward time yet"
+                }
+                ruleStyle={{ backgroundColor: rewardPalette.progress }}
+                title="Reward balance"
               />
-            </section>
+            </div>
           </section>
 
-          <aside className="space-y-10">
-            <OverviewSection title="Weekly overview">
-              <div className="space-y-5">
+          <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
+            <OverviewModule
+              body={
                 <BlockMeter
                   color="work"
                   count={weeklyWorkBlocks.length}
                   label=""
-                  valueLabel={`${weeklyWorkBlocks.length} work blocks`}
+                  valueLabel=""
                   zeroLabel="No work blocks this week"
                 />
+              }
+              footer={
                 <div className="grid gap-4 border-t border-slate-200/80 pt-4">
                   <div className="space-y-1">
                     <p className="text-sm text-slate-500">Reward earned</p>
@@ -667,16 +689,22 @@ export default function HomePage() {
                     </p>
                   </div>
                 </div>
-              </div>
-            </OverviewSection>
+              }
+              title="Weekly overview"
+            />
+          </section>
 
-            <OverviewSection title="Recent activity">
-              <LedgerEventList
-                emptyMessage="Finish a work timer to create your first saved ledger event."
-                events={recentLedgerEvents}
-              />
-            </OverviewSection>
-          </aside>
+          <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)] lg:col-start-3">
+            <OverviewModule
+              body={
+                <LedgerEventList
+                  emptyMessage="Finish a work timer to create your first saved ledger event."
+                  events={recentLedgerEvents}
+                />
+              }
+              title="Recent activity"
+            />
+          </section>
         </section>
       </div>
 
@@ -707,36 +735,68 @@ export default function HomePage() {
       </Dialog>
 
       <Dialog
-        onClose={() => setIsRewardDialogOpen(false)}
+        onClose={() => {
+          setIsRewardDialogOpen(false);
+          setRewardHours("0");
+          setRewardMinutes("0");
+          setRewardDayOffset(0);
+          setRewardNote("");
+        }}
         open={isRewardDialogOpen}
         title="Spend reward"
       >
         <div className="space-y-4">
-          <ActionField
-            label="Reward name"
-            onChange={(event) => setRewardName(event.target.value)}
-            placeholder="Walk, coffee, reading"
-            value={rewardName}
-          />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <ActionField
-              label="Reward minutes"
-              inputMode="numeric"
-              min="1"
-              onChange={(event) => setRewardMinutes(event.target.value)}
-              type="number"
-              value={rewardMinutes}
-            />
-            <label className="space-y-2">
-              <span className="text-sm text-slate-600">Equivalent cost</span>
-              <div className="flex h-11 items-center rounded-2xl border border-slate-300/80 bg-white/80 px-4 text-sm text-slate-500">
-                {Math.max(
-                  1,
-                  Math.ceil((Number.parseInt(rewardMinutes, 10) || 0) / WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK),
-                )}{" "}
-                work blocks
-              </div>
-            </label>
+          <div className="space-y-2">
+            <span className="text-sm text-slate-600">Reward time</span>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ActionField
+                label="Hours"
+                inputMode="numeric"
+                min="0"
+                onChange={(event) => setRewardHours(event.target.value)}
+                step="1"
+                type="number"
+                value={rewardHours}
+              />
+              <ActionField
+                label="Minutes"
+                inputMode="numeric"
+                max="55"
+                min="0"
+                onChange={(event) => setRewardMinutes(event.target.value)}
+                step="5"
+                type="number"
+                value={rewardMinutes}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <span className="text-sm text-slate-600">Day of reward block</span>
+            <div className="flex items-center justify-between rounded-2xl border border-slate-300/80 bg-white/80 px-4 py-3">
+              <Button
+                className="text-slate-500"
+                onClick={() => setRewardDayOffset((current) => current - 1)}
+                size="inline"
+                variant="text"
+              >
+                ←
+              </Button>
+              <span className="text-sm font-medium text-slate-900">
+                {formatRewardReportDate(rewardDayOffset)}
+              </span>
+              {rewardDayOffset < 0 ? (
+                <Button
+                  className="text-slate-500"
+                  onClick={() => setRewardDayOffset((current) => Math.min(current + 1, 0))}
+                  size="inline"
+                  variant="text"
+                >
+                  →
+                </Button>
+              ) : (
+                <span className="w-4" />
+              )}
+            </div>
           </div>
           <ActionField
             label="Note"

@@ -111,10 +111,17 @@ Reward earning rules for the MVP:
 The home overview should include:
 
 - Current reward balance.
-- Reward rules.
+- Reward reporting controls.
 - Subtle entry points for manual reward redemption and manual work corrections.
 
 Manual reward redemption and manual work correction forms should stay tucked behind lightweight dialogs so the overview surface remains quiet until the user explicitly opens them.
+
+Reward reporting UI rules for the MVP:
+
+- Reward reports should capture duration using separate hour and minute fields.
+- Minute entry should move in 5-minute increments.
+- Reward reports should capture the day the reward happened using a constrained back-in-time day selector, not a future-planning date picker.
+- The selected reward day should be persisted as a concrete datetime using a normalized local midday timestamp for now.
 
 ### Brief
 
@@ -251,6 +258,7 @@ Reward balance math should be derived from persisted ledger events:
 - `work_earned` events add reward minutes based on whether the event timestamp falls on a weekday or weekend.
 - `reward_spent` events subtract the redeemed reward minutes stored in ledger metadata.
 - The displayed balance may be positive or negative.
+- Reported reward days should be stored as durable datetimes, not relative labels like `today` or `yesterday`.
 
 Current balances should be derived from ledger events or a trusted database view. Do not rely only on client-side state.
 
