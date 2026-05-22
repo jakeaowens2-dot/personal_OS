@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useEffectEvent, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { Badge } from "@/components/ui/Badge";
 import { TimerControls } from "@/components/timer/TimerControls";
 import { TimerModeTabs } from "@/components/timer/TimerModeTabs";
@@ -98,6 +98,9 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   const [remainingSeconds, setRemainingSeconds] = useState(getModeDurationSeconds("work"));
   const [status, setStatus] = useState<TimerStatus>("idle");
   const [lastCompletedMode, setLastCompletedMode] = useState<TimerMode | null>(null);
+  const completionEmittedRef = useRef(false);
+  const modeRef = useRef<TimerMode>(mode);
+  const remainingSecondsRef = useRef(remainingSeconds);
 
   const palette = timerPalette[mode];
   const totalSeconds = getModeDurationSeconds(mode);
@@ -107,17 +110,29 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   }, [remainingSeconds, totalSeconds]);
 
   const handleTick = useEffectEvent(() => {
-    setRemainingSeconds((current) => {
-      if (current <= 1) {
-        const completedAt = new Date().toISOString();
-        setStatus("complete");
-        setLastCompletedMode(mode);
-        onComplete?.({ completedAt, mode });
-        return 0;
+    const current = remainingSecondsRef.current;
+
+    if (current <= 1) {
+      if (completionEmittedRef.current) {
+        return;
       }
 
-      return current - 1;
-    });
+      completionEmittedRef.current = true;
+      remainingSecondsRef.current = 0;
+      setRemainingSeconds(0);
+
+      const completedAt = new Date().toISOString();
+      const completedMode = modeRef.current;
+
+      setStatus("complete");
+      setLastCompletedMode(completedMode);
+      onComplete?.({ completedAt, mode: completedMode });
+      return;
+    }
+
+    const next = current - 1;
+    remainingSecondsRef.current = next;
+    setRemainingSeconds(next);
   });
 
   useEffect(() => {
@@ -135,6 +150,14 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   useEffect(() => {
     onStateChange?.({ mode, status });
   }, [mode, onStateChange, status]);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
+
+  useEffect(() => {
+    remainingSecondsRef.current = remainingSeconds;
+  }, [remainingSeconds]);
 
   useEffect(() => {
     if (status === "complete") {
@@ -158,15 +181,20 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   }, [status]);
 
   const handleModeChange = (nextMode: TimerMode) => {
+    completionEmittedRef.current = false;
     setMode(nextMode);
     setRemainingSeconds(getModeDurationSeconds(nextMode));
+    remainingSecondsRef.current = getModeDurationSeconds(nextMode);
     setStatus("idle");
     setLastCompletedMode(null);
   };
 
   const handleStart = () => {
+    completionEmittedRef.current = false;
     if (remainingSeconds === 0) {
-      setRemainingSeconds(getModeDurationSeconds(mode));
+      const resetSeconds = getModeDurationSeconds(mode);
+      setRemainingSeconds(resetSeconds);
+      remainingSecondsRef.current = resetSeconds;
     }
 
     setStatus("running");
@@ -178,7 +206,10 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   };
 
   const handleReset = () => {
-    setRemainingSeconds(getModeDurationSeconds(mode));
+    const resetSeconds = getModeDurationSeconds(mode);
+    completionEmittedRef.current = false;
+    setRemainingSeconds(resetSeconds);
+    remainingSecondsRef.current = resetSeconds;
     setStatus("idle");
     setLastCompletedMode(null);
   };

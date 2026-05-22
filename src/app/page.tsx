@@ -1,9 +1,21 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
+import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes, type ReactNode } from "react";
+import { LedgerEventList } from "@/components/ledger/LedgerEventList";
 import { PomodoroTimer, type TimerStatus } from "@/components/timer/PomodoroTimer";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
+import { dedupeLedgerEvents } from "@/lib/ledger";
+import {
+  getRewardBalanceMinutes,
+  getRewardMinutesForWorkEvent,
+  isWeekendDate,
+  REWARD_BLOCK_MINUTES,
+  WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK,
+  WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK,
+  WEEKEND_REWARD_MULTIPLIER_LABEL,
+} from "@/lib/rewards";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { rewardPalette, timerPalette } from "@/lib/timerPalette";
 import {
@@ -62,40 +74,48 @@ function getTodayLabel() {
   }).format(new Date());
 }
 
+function isThisWeek(isoTimestamp: string) {
+  const date = new Date(isoTimestamp);
+  const now = new Date();
+  const currentDay = now.getDay();
+  const distanceFromMonday = currentDay === 0 ? 6 : currentDay - 1;
+  const startOfWeek = new Date(now);
+  startOfWeek.setHours(0, 0, 0, 0);
+  startOfWeek.setDate(now.getDate() - distanceFromMonday);
+
+  return date >= startOfWeek;
+}
+
 function getVisibleSquares(count: number, maxVisible = 12) {
   return Array.from({ length: Math.min(count, maxVisible) });
 }
 
-function getEventSquares(count: number, maxVisible = 4) {
-  return Array.from({ length: Math.min(Math.abs(count), maxVisible) });
+function dedupeWorkBlocks(workBlocks: WorkBlock[]) {
+  const seen = new Set<string>();
+
+  return workBlocks.filter((workBlock) => {
+    const key = [
+      workBlock.earned_at,
+      workBlock.duration_minutes,
+      workBlock.tag ?? "",
+    ].join("|");
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
 }
 
-function getLedgerEventTitle(event: LedgerEvent) {
-  if (event.event_type === "reward_spent") {
-    const rewardName =
-      typeof event.metadata?.reward_name === "string" ? event.metadata.reward_name : "Reward used";
+function formatRewardMinutes(totalMinutes: number) {
+  const absoluteMinutes = Math.abs(totalMinutes);
+  const hours = Math.floor(absoluteMinutes / 60);
+  const minutes = absoluteMinutes % 60;
+  const prefix = totalMinutes < 0 ? "-" : "";
 
-    return rewardName;
-  }
-
-  if (event.source === "manual_entry") {
-    return "Manual work block added";
-  }
-
-  return "Work block earned";
-}
-
-function getLedgerEventDetail(event: LedgerEvent) {
-  if (event.event_type === "reward_spent") {
-    const cost = Math.abs(event.delta_work_blocks);
-    return `${formatTimestamp(event.created_at)} · spent ${cost} work block${cost === 1 ? "" : "s"}`;
-  }
-
-  return `${formatTimestamp(event.created_at)} via ${event.source}`;
-}
-
-function SubtleDivider() {
-  return <div aria-hidden="true" className="h-px w-16 bg-slate-300/70" />;
+  return `${prefix}${hours}:${minutes.toString().padStart(2, "0")}`;
 }
 
 type ActionFieldProps = {
@@ -115,39 +135,92 @@ function ActionField({ label, className, ...props }: ActionFieldProps) {
 }
 
 type BlockMeterProps = {
-  color: "reward" | "work";
+  color: "reward" | "reward_negative" | "work";
   count: number;
   label: string;
+  maxVisible?: number;
+  partialCount?: number;
+  zeroLabel?: string;
   valueLabel: string;
 };
 
-function BlockMeter({ color, count, label, valueLabel }: BlockMeterProps) {
+function BlockMeter({
+  color,
+  count,
+  label,
+  maxVisible = 12,
+  partialCount,
+  valueLabel,
+  zeroLabel = "No blocks yet",
+}: BlockMeterProps) {
   const palette =
     color === "work"
       ? timerPalette.work.progress
-      : rewardPalette.progress;
+      : color === "reward"
+        ? rewardPalette.progress
+        : "#94a3b8";
+  const visibleSquares = getVisibleSquares(Math.ceil(partialCount ?? count), maxVisible);
 
   return (
     <div className="space-y-3">
-      <div className="flex items-baseline justify-between gap-4">
-        <span className="text-slate-500">{label}</span>
-        <p className="text-sm font-medium text-slate-800">{valueLabel}</p>
-      </div>
+      {label ? <p className="text-sm text-slate-500">{label}</p> : null}
       <div className="flex min-h-4 flex-wrap gap-2">
         {count === 0 ? (
-          <div className="text-xs text-slate-400">No blocks yet</div>
+          <div className="text-xs text-slate-400">{zeroLabel}</div>
         ) : (
-          getVisibleSquares(count).map((_, index) => (
-            <span
-              key={`${label}-${index}`}
-              className="h-3.5 w-3.5 rounded-[4px]"
-              style={{ backgroundColor: palette }}
-            />
-          ))
+          visibleSquares.map((_, index) => {
+            const fillRatio = partialCount == null
+              ? 1
+              : Math.max(0, Math.min(1, partialCount - index));
+
+            return (
+              <span
+                key={`${label}-${index}`}
+                className="relative h-3.5 w-3.5 overflow-hidden rounded-[4px] bg-slate-200/80"
+              >
+                <span
+                  className="absolute inset-y-0 left-0 rounded-[4px]"
+                  style={{
+                    backgroundColor: palette,
+                    width: `${fillRatio * 100}%`,
+                  }}
+                />
+              </span>
+            );
+          })
         )}
-        {count > 12 ? <span className="text-xs text-slate-500">+{count - 12}</span> : null}
+        {count > maxVisible ? <span className="text-xs text-slate-500">+{count - maxVisible}</span> : null}
       </div>
+      {valueLabel ? <p className="text-sm font-semibold text-slate-900">{valueLabel}</p> : null}
     </div>
+  );
+}
+
+type OverviewSectionProps = {
+  actionLabel?: string;
+  children: ReactNode;
+  headerAdornment?: ReactNode;
+  onAction?: () => void;
+  title: string;
+};
+
+function OverviewSection({ actionLabel, children, headerAdornment, onAction, title }: OverviewSectionProps) {
+  return (
+    <section className="space-y-5">
+      <div aria-hidden="true" className="h-px w-14 bg-slate-300/80" />
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <h2 className="text-base font-semibold text-slate-950">{title}</h2>
+          {headerAdornment}
+        </div>
+        {actionLabel && onAction ? (
+          <Button onClick={onAction} size="sm" variant="ghost">
+            {actionLabel}
+          </Button>
+        ) : null}
+      </div>
+      {children}
+    </section>
   );
 }
 
@@ -168,34 +241,68 @@ export default function HomePage() {
   const [workspaceUserId, setWorkspaceUserId] = useState<string | null>(null);
   const [manualWorkMinutes, setManualWorkMinutes] = useState("50");
   const [manualWorkNote, setManualWorkNote] = useState("");
-  const [rewardCost, setRewardCost] = useState("1");
+  const [isManualDialogOpen, setIsManualDialogOpen] = useState(false);
+  const [isRewardDialogOpen, setIsRewardDialogOpen] = useState(false);
   const [rewardMinutes, setRewardMinutes] = useState("30");
   const [rewardName, setRewardName] = useState("Walk");
   const [rewardNote, setRewardNote] = useState("");
   const handledCompletionKeysRef = useRef(new Set<string>());
 
-  const todaysWorkBlocks = useMemo(
-    () => localLedgerState.workBlocks.filter((workBlock) => isToday(workBlock.earned_at)),
+  const dedupedWorkBlocks = useMemo(
+    () => dedupeWorkBlocks(localLedgerState.workBlocks),
     [localLedgerState.workBlocks],
+  );
+
+  const dedupedLedgerEvents = useMemo(
+    () => dedupeLedgerEvents(localLedgerState.ledgerEvents),
+    [localLedgerState.ledgerEvents],
+  );
+
+  const todaysWorkBlocks = useMemo(
+    () => dedupedWorkBlocks.filter((workBlock) => isToday(workBlock.earned_at)),
+    [dedupedWorkBlocks],
   );
 
   const currentWorkBalance = useMemo(
     () =>
-      localLedgerState.ledgerEvents.reduce(
+      dedupedLedgerEvents.reduce(
         (total, event) => total + event.delta_work_blocks,
         0,
       ),
-    [localLedgerState.ledgerEvents],
+    [dedupedLedgerEvents],
+  );
+
+  const currentRewardMinutes = useMemo(
+    () => getRewardBalanceMinutes(dedupedLedgerEvents),
+    [dedupedLedgerEvents],
+  );
+
+  const currentRewardBalance = useMemo(
+    () => Math.abs(currentRewardMinutes) / REWARD_BLOCK_MINUTES,
+    [currentRewardMinutes],
+  );
+
+  const isWeekendBonusActive = useMemo(
+    () => isWeekendDate(new Date().toISOString()),
+    [],
   );
 
   const weeklyWorkBlocks = useMemo(
-    () => localLedgerState.workBlocks.length,
-    [localLedgerState.workBlocks],
+    () => dedupedWorkBlocks.filter((workBlock) => isThisWeek(workBlock.earned_at)),
+    [dedupedWorkBlocks],
+  );
+
+  const weeklyRewardMinutesEarned = useMemo(
+    () =>
+      dedupedLedgerEvents
+        .filter((event) => event.event_type === "work_earned" && isThisWeek(event.created_at))
+        .reduce((total, event) => total + getRewardMinutesForWorkEvent(event), 0),
+    [dedupedLedgerEvents],
   );
 
   const recentLedgerEvents = useMemo(
-    () => localLedgerState.ledgerEvents.slice(0, 3),
-    [localLedgerState.ledgerEvents],
+    () => dedupedLedgerEvents.slice(0, 5),
+    [dedupedLedgerEvents],
   );
 
   const pageToneClass = useMemo(() => {
@@ -377,6 +484,7 @@ export default function HomePage() {
         workBlocks: [artifacts.workBlock, ...current.workBlocks],
       }));
       setManualWorkNote("");
+      setIsManualDialogOpen(false);
       setPersistenceState({
         kind: "saved",
         message: "Manual work block saved",
@@ -390,8 +498,11 @@ export default function HomePage() {
   };
 
   const handleRewardSpend = async () => {
-    const costWorkBlocks = Number.parseInt(rewardCost, 10);
     const redeemMinutes = Number.parseInt(rewardMinutes, 10);
+    const derivedCostWorkBlocks = Math.max(
+      1,
+      Math.ceil(redeemMinutes / WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK),
+    );
 
     if (!supabase || !workspaceUserId) {
       setPersistenceState({
@@ -409,26 +520,10 @@ export default function HomePage() {
       return;
     }
 
-    if (!Number.isFinite(costWorkBlocks) || costWorkBlocks <= 0) {
-      setPersistenceState({
-        kind: "error",
-        message: "Reward cost must be at least one work block.",
-      });
-      return;
-    }
-
     if (!Number.isFinite(redeemMinutes) || redeemMinutes <= 0) {
       setPersistenceState({
         kind: "error",
         message: "Reward minutes must be greater than zero.",
-      });
-      return;
-    }
-
-    if (costWorkBlocks > currentWorkBalance) {
-      setPersistenceState({
-        kind: "error",
-        message: "Not enough available work blocks to spend that reward.",
       });
       return;
     }
@@ -440,7 +535,7 @@ export default function HomePage() {
 
     try {
       const { ledgerEvent } = await persistRewardSpend(supabase, {
-        costWorkBlocks,
+        costWorkBlocks: derivedCostWorkBlocks,
         notes: rewardNote,
         redeemedAt: new Date().toISOString(),
         rewardMinutes: redeemMinutes,
@@ -453,6 +548,7 @@ export default function HomePage() {
         ledgerEvents: [ledgerEvent, ...current.ledgerEvents],
       }));
       setRewardNote("");
+      setIsRewardDialogOpen(false);
       setPersistenceState({
         kind: "saved",
         message: "Reward spend saved",
@@ -492,182 +588,167 @@ export default function HomePage() {
           onStateChange={setTimerVisualState}
         />
 
-        <section className="pt-2">
-          <SubtleDivider />
-          <div className="mt-5 grid gap-6 sm:grid-cols-3">
-            <BlockMeter
-              color="work"
-              count={todaysWorkBlocks.length}
-              label="Today"
-              valueLabel={`${todaysWorkBlocks.length} work blocks`}
-            />
-            <BlockMeter
-              color="reward"
-              count={currentWorkBalance}
-              label="Reward balance"
-              valueLabel={`${currentWorkBalance} available`}
-            />
-            <BlockMeter
-              color="work"
-              count={weeklyWorkBlocks}
-              label="This week"
-              valueLabel={`${weeklyWorkBlocks} work blocks`}
-            />
-          </div>
-        </section>
-
-        <section className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
-          <section className="space-y-4 pt-2">
-            <SubtleDivider />
-            <div className="space-y-1 pt-4">
-              <h2 className="text-lg font-semibold text-slate-950">Recent activity</h2>
-              <p className="text-sm text-slate-600">
-                Saved work and reward events appear here as they happen.
-              </p>
-            </div>
-
-            <div className="space-y-3">
-              {recentLedgerEvents.length === 0 ? (
-                <div className="px-1 py-4 text-sm text-slate-600">
-                  Finish a work timer to create your first saved ledger event.
+        <section className="grid gap-10 pt-2 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
+          <section className="grid gap-8 md:grid-cols-2 md:gap-10">
+            <section className="space-y-5">
+              <div aria-hidden="true" className="h-px w-14 bg-slate-300/80" />
+              <div className="flex items-start justify-between gap-4">
+                <h2 className="text-base font-semibold text-slate-950">Today&apos;s work</h2>
+                <div className="flex flex-col items-end gap-1">
+                  <p className="text-sm font-semibold text-slate-950">
+                    {todaysWorkBlocks.length} block{todaysWorkBlocks.length === 1 ? "" : "s"}
+                  </p>
+                  <Button onClick={() => setIsManualDialogOpen(true)} size="sm" variant="ghost">
+                    Add manually
+                  </Button>
                 </div>
-              ) : (
-                recentLedgerEvents.map((event) => (
-                  <article
-                    key={event.id}
-                    className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-300/60 px-1 py-4 first:border-t-0"
-                  >
-                    <div>
-                      <p className="font-medium text-slate-900">{getLedgerEventTitle(event)}</p>
-                      <p className="mt-1 text-sm text-slate-600">{getLedgerEventDetail(event)}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {getEventSquares(event.delta_work_blocks, 4).map((_, index) => (
-                        <span
-                          key={`${event.id}-${index}`}
-                          className="h-3 w-3 rounded-[4px]"
-                          style={{
-                            backgroundColor:
-                              event.event_type === "reward_spent"
-                                ? rewardPalette.progress
-                                : timerPalette.work.progress,
-                          }}
-                        />
-                      ))}
-                    </div>
-                  </article>
-                ))
-              )}
-            </div>
+              </div>
+              <BlockMeter
+                color="work"
+                count={todaysWorkBlocks.length}
+                label=""
+                valueLabel=""
+                zeroLabel="No completed blocks yet"
+              />
+            </section>
+
+            <section className="space-y-5">
+              <div aria-hidden="true" className="h-px w-14 bg-slate-300/80" />
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-base font-semibold text-slate-950">Reward balance</h2>
+                  {isWeekendBonusActive ? (
+                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+                      {WEEKEND_REWARD_MULTIPLIER_LABEL}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <p className="text-sm font-semibold text-slate-950">
+                    {currentRewardMinutes < 0
+                      ? `${formatRewardMinutes(currentRewardMinutes)} behind`
+                      : `${formatRewardMinutes(currentRewardMinutes)} available`}
+                  </p>
+                  <Button onClick={() => setIsRewardDialogOpen(true)} size="sm" variant="ghost">
+                    Spend reward
+                  </Button>
+                </div>
+              </div>
+              <BlockMeter
+                color={currentRewardMinutes < 0 ? "reward_negative" : "reward"}
+                count={Math.ceil(currentRewardBalance)}
+                label=""
+                partialCount={currentRewardBalance}
+                valueLabel=""
+                zeroLabel="No reward time yet"
+              />
+            </section>
           </section>
 
-          <section className="space-y-4 pt-2">
-            <SubtleDivider />
-            <div className="space-y-1 pt-4">
-              <h2 className="text-lg font-semibold text-slate-950">Today&apos;s blocks</h2>
-              <p className="text-sm text-slate-600">A small saved record of what you&apos;ve earned.</p>
-            </div>
-
-            <div className="space-y-3">
-              {todaysWorkBlocks.length === 0 ? (
-                <div className="px-1 py-4 text-sm text-slate-600">
-                  No work blocks earned yet today.
+          <aside className="space-y-10">
+            <OverviewSection title="Weekly overview">
+              <div className="space-y-5">
+                <BlockMeter
+                  color="work"
+                  count={weeklyWorkBlocks.length}
+                  label=""
+                  valueLabel={`${weeklyWorkBlocks.length} work blocks`}
+                  zeroLabel="No work blocks this week"
+                />
+                <div className="grid gap-4 border-t border-slate-200/80 pt-4">
+                  <div className="space-y-1">
+                    <p className="text-sm text-slate-500">Reward earned</p>
+                    <p className="text-sm font-medium text-slate-900">{formatRewardMinutes(weeklyRewardMinutesEarned)}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-slate-500">Work balance</p>
+                    <p className="text-sm font-medium text-slate-900">
+                      {currentWorkBalance} work block{Math.abs(currentWorkBalance) === 1 ? "" : "s"}
+                    </p>
+                  </div>
                 </div>
-              ) : (
-                todaysWorkBlocks.map((workBlock) => (
-                  <article
-                    key={workBlock.id}
-                    className="border-t border-slate-300/60 px-1 py-4 first:border-t-0"
-                  >
-                    <div className="flex items-center justify-between gap-4">
-                      <div>
-                        <p className="font-medium text-slate-900">
-                          {workBlock.duration_minutes}-minute work block
-                        </p>
-                        <p className="mt-1 text-sm text-slate-600">
-                          Earned {formatTimestamp(workBlock.earned_at)}
-                        </p>
-                      </div>
-                      <span
-                        className="h-4 w-4 rounded-[5px]"
-                        style={{ backgroundColor: timerPalette.work.progress }}
-                      />
-                    </div>
-                  </article>
-                ))
-              )}
-            </div>
+              </div>
+            </OverviewSection>
 
-            <div className="space-y-4 border-t border-slate-300/60 pt-5">
-              <div className="space-y-1">
-                <h3 className="text-base font-semibold text-slate-950">Add missed work</h3>
-                <p className="text-sm text-slate-600">Use this if you forgot to run the timer.</p>
-              </div>
-              <div className="space-y-3">
-                <ActionField
-                  label="Minutes"
-                  inputMode="numeric"
-                  min="1"
-                  onChange={(event) => setManualWorkMinutes(event.target.value)}
-                  type="number"
-                  value={manualWorkMinutes}
-                />
-                <ActionField
-                  label="Note"
-                  onChange={(event) => setManualWorkNote(event.target.value)}
-                  placeholder="Optional note"
-                  value={manualWorkNote}
-                />
-                <Button className="w-full" onClick={handleManualWorkAdd} variant="secondary">
-                  Add work block
-                </Button>
-              </div>
-            </div>
-
-            <div className="space-y-4 border-t border-slate-300/60 pt-5">
-              <div className="space-y-1">
-                <h3 className="text-base font-semibold text-slate-950">Spend reward</h3>
-                <p className="text-sm text-slate-600">Log a reward so the available balance stays honest.</p>
-              </div>
-              <div className="space-y-3">
-                <ActionField
-                  label="Reward name"
-                  onChange={(event) => setRewardName(event.target.value)}
-                  placeholder="Walk, coffee, reading"
-                  value={rewardName}
-                />
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <ActionField
-                    label="Cost in work blocks"
-                    inputMode="numeric"
-                    min="1"
-                    onChange={(event) => setRewardCost(event.target.value)}
-                    type="number"
-                    value={rewardCost}
-                  />
-                  <ActionField
-                    label="Reward minutes"
-                    inputMode="numeric"
-                    min="1"
-                    onChange={(event) => setRewardMinutes(event.target.value)}
-                    type="number"
-                    value={rewardMinutes}
-                  />
-                </div>
-                <ActionField
-                  label="Note"
-                  onChange={(event) => setRewardNote(event.target.value)}
-                  placeholder="Optional note"
-                  value={rewardNote}
-                />
-                <Button className="w-full" onClick={handleRewardSpend} variant="secondary">
-                  Spend reward
-                </Button>
-              </div>
-            </div>
-          </section>
+            <OverviewSection title="Recent activity">
+              <LedgerEventList
+                emptyMessage="Finish a work timer to create your first saved ledger event."
+                events={recentLedgerEvents}
+              />
+            </OverviewSection>
+          </aside>
         </section>
       </div>
+
+      <Dialog
+        onClose={() => setIsManualDialogOpen(false)}
+        open={isManualDialogOpen}
+        title="Add missed work"
+      >
+        <div className="space-y-4">
+          <ActionField
+            label="Minutes"
+            inputMode="numeric"
+            min="1"
+            onChange={(event) => setManualWorkMinutes(event.target.value)}
+            type="number"
+            value={manualWorkMinutes}
+          />
+          <ActionField
+            label="Note"
+            onChange={(event) => setManualWorkNote(event.target.value)}
+            placeholder="Optional note"
+            value={manualWorkNote}
+          />
+          <Button className="w-full" onClick={handleManualWorkAdd} variant="secondary">
+            Add work block
+          </Button>
+        </div>
+      </Dialog>
+
+      <Dialog
+        onClose={() => setIsRewardDialogOpen(false)}
+        open={isRewardDialogOpen}
+        title="Spend reward"
+      >
+        <div className="space-y-4">
+          <ActionField
+            label="Reward name"
+            onChange={(event) => setRewardName(event.target.value)}
+            placeholder="Walk, coffee, reading"
+            value={rewardName}
+          />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <ActionField
+              label="Reward minutes"
+              inputMode="numeric"
+              min="1"
+              onChange={(event) => setRewardMinutes(event.target.value)}
+              type="number"
+              value={rewardMinutes}
+            />
+            <label className="space-y-2">
+              <span className="text-sm text-slate-600">Equivalent cost</span>
+              <div className="flex h-11 items-center rounded-2xl border border-slate-300/80 bg-white/80 px-4 text-sm text-slate-500">
+                {Math.max(
+                  1,
+                  Math.ceil((Number.parseInt(rewardMinutes, 10) || 0) / WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK),
+                )}{" "}
+                work blocks
+              </div>
+            </label>
+          </div>
+          <ActionField
+            label="Note"
+            onChange={(event) => setRewardNote(event.target.value)}
+            placeholder="Optional note"
+            value={rewardNote}
+          />
+          <Button className="w-full" onClick={handleRewardSpend} variant="secondary">
+            Spend reward
+          </Button>
+        </div>
+      </Dialog>
     </main>
   );
 }

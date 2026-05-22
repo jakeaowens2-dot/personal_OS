@@ -181,11 +181,13 @@ Acceptance criteria:
 
 ## Phase 3 — Ledger and Rewards
 
-### 3.1 Build ledger screen
+### 3.1 Build ledger section
 
-Status: Not started
+Status: Complete
 
-Create a ledger page showing earned/spent events.
+Note: Kept the ledger in the home overview instead of creating a separate route, extracted the recent-activity UI into `src/components/ledger/LedgerEventList.tsx`, moved ledger deduping into `src/lib/ledger.ts`, and updated the product docs/codemap to reflect the overview-first architecture. Verified with `npm run lint` and `npm run typecheck`.
+
+Create a ledger section within the home overview showing earned/spent events.
 
 Acceptance criteria:
 - Events display type, delta, source, and timestamp.
