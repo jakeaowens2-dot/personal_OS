@@ -59,6 +59,30 @@ Notes:
 - Do not expose a service-role key to client components.
 - `.env.example` shows the expected variable names, and `.env.local` can hold your local values.
 
+## Vercel Deployment
+
+Deploy the `productivity-os-v1` directory as a Next.js project on Vercel.
+
+Before the first production deploy:
+
+1. In Vercel Project Settings, add:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+2. In Supabase, enable Anonymous sign-ins under Authentication providers.
+3. Apply the SQL migrations in `supabase/migrations/` to the target Supabase project.
+
+Recommended verification after deploy:
+
+1. Open the production site and confirm the home page loads without the missing-env message.
+2. Start or complete a work timer and confirm a workspace session is created.
+3. Add a manual work block and verify a `timer_sessions`, `work_blocks`, and `ledger_events` row are written.
+4. Spend a reward and verify a `reward_rules`, `reward_redemptions`, and `ledger_events` row are written.
+
+If the site loads but persistence fails, check these first:
+- Anonymous auth is enabled in Supabase.
+- Both public env vars are present in Vercel for the correct environment.
+- The schema and RLS policies from `supabase/migrations/` were applied to the same Supabase project referenced by the Vercel env vars.
+
 ## Current Phase
 
 Start with Phase 0 through Phase 2 in `docs/TASKS.md`.
