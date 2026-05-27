@@ -147,6 +147,28 @@ Primary screens:
 - Rewards
 - Brief, later phase only
 
+Visual style for this repo:
+- Prefer highly minimalist layouts over dashboard-card patterns.
+- Differentiate sections with spacing, grid structure, and thin neutral borders before adding containers.
+- Prefer partial-width dividers, hairline separators, and quiet subsection boundaries over large rounded cards.
+- Avoid stacking multiple oversized surface boxes when a simpler layout treatment can do the job.
+- Large corner radii should be used sparingly. Do not default to pill-heavy or soft-card-heavy UI patterns.
+
+Information density rules:
+- Do not repeat the same information in multiple forms just to fill space.
+- Minimize explanatory or instructional copy in the main interface.
+- If a number, label, and visual indicator already communicate the state, do not add extra prose restating it.
+- Keep section headers short and functional.
+- Favor one strong representation of a datum instead of a heading, summary sentence, metadata line, and duplicate visual all describing the same thing.
+
+Home overview behavior:
+- Treat the home screen as a quiet overview, not a feature gallery.
+- Show only the information needed to understand the current state at a glance.
+- Secondary actions such as manual corrections or reward spending should stay visually subtle and appear only when needed.
+- Deeper explanation, browsing, and verbose metadata belong in expanded surfaces or later dedicated routes, not in the default overview.
+- Overview modules that appear side-by-side must share a common page grid and a common internal section skeleton for header, body, and footer alignment.
+- Do not hand-position neighboring overview sections independently with one-off flex alignment rules. Extend the shared layout primitive instead.
+
 The MVP dashboard should stay sparse:
 - Timer
 - Today’s work blocks

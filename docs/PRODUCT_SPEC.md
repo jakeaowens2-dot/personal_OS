@@ -75,14 +75,23 @@ The home screen should include:
 - Start/pause/reset controls.
 - Today’s completed work blocks.
 - Reward balance.
+- A small ledger of recent earned/spent events.
 - Current session state.
 - Small weekly summary.
+- Later: a compact daily task surface.
+- Later: a compact chat surface for notes and basic questions.
+
+The home screen is the general overview surface for MVP and near-term phases. Keep it focused on current work state, rewards, and a compact recent-history view rather than splitting these into separate routes too early.
 
 Later, it may include one to three AI-surfaced tasks for today.
 
 ### Ledger
 
-The ledger screen should include:
+The MVP ledger experience may live on the home screen as a compact section beneath the timer.
+
+When the product needs deeper browsing, filtering, or historical drill-down, a dedicated ledger/history route can be introduced.
+
+Ledger content should include:
 
 - Earned work-block events.
 - Spent reward events.
@@ -92,12 +101,27 @@ The ledger screen should include:
 
 ### Rewards
 
-The rewards screen should include:
+Reward earning rules for the MVP:
+
+- On weekdays, one completed 50-minute work block earns 20 minutes of reward time.
+- On weekends, one completed work block earns 30 minutes of reward time, displayed as a `1.5x` bonus state.
+- Reward balance may go negative if more reward time is spent than has been earned.
+- Reward balance should be derived from persisted ledger events, not optimistic client-only state.
+
+The home overview should include:
 
 - Current reward balance.
-- Reward rules.
-- Available reward types.
-- Manual reward redemption.
+- Reward reporting controls.
+- Subtle entry points for manual reward redemption and manual work corrections.
+
+Manual reward redemption and manual work correction forms should stay tucked behind lightweight dialogs so the overview surface remains quiet until the user explicitly opens them.
+
+Reward reporting UI rules for the MVP:
+
+- Reward reports should capture duration using separate hour and minute fields.
+- Minute entry should move in 5-minute increments.
+- Reward reports should capture the day the reward happened using a constrained back-in-time day selector, not a future-planning date picker.
+- The selected reward day should be persisted as a concrete datetime using a normalized local midday timestamp for now.
 
 ### Brief
 
@@ -111,6 +135,8 @@ The brief screen should include:
 - External news/context.
 - Suggested schedule.
 - Opened/read state.
+
+Dedicated screens or tabs become important later when a surface needs significantly more room than the home overview can support, such as deep daily work histories, newsletter-style brief review, or an expanded chat experience for browsing substantial content.
 
 ## 7. Data Model
 
@@ -226,6 +252,13 @@ A reward redemption should create:
 
 1. A `RewardRedemption`.
 2. A `LedgerEvent` with negative `delta_work_blocks`.
+
+Reward balance math should be derived from persisted ledger events:
+
+- `work_earned` events add reward minutes based on whether the event timestamp falls on a weekday or weekend.
+- `reward_spent` events subtract the redeemed reward minutes stored in ledger metadata.
+- The displayed balance may be positive or negative.
+- Reported reward days should be stored as durable datetimes, not relative labels like `today` or `yesterday`.
 
 Current balances should be derived from ledger events or a trusted database view. Do not rely only on client-side state.
 

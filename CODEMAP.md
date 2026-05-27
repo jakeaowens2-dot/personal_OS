@@ -15,6 +15,10 @@ src/
     layout.tsx
     page.tsx
   components/
+    ledger/
+      LedgerEventList.tsx
+    overview/
+      OverviewModule.tsx
     timer/
       PomodoroTimer.tsx
       TimerControls.tsx
@@ -23,10 +27,12 @@ src/
       Badge.tsx
       Button.tsx
       Card.tsx
+      Dialog.tsx
       StatCard.tsx
   lib/
     cn.ts
     ledger.ts
+    rewards.ts
     supabase/
       client.ts
       middleware.ts
@@ -61,9 +67,7 @@ src/
     page.tsx
     layout.tsx
     globals.css
-    ledger/
-      page.tsx
-    rewards/
+    history/
       page.tsx
     brief/
       page.tsx
@@ -73,6 +77,7 @@ src/
       Button.tsx
       Card.tsx
       Badge.tsx
+      Dialog.tsx
       StatCard.tsx
     timer/
       PomodoroTimer.tsx
@@ -128,7 +133,7 @@ Current files:
 
 ### Ledger behavior
 
-Current file:
+Current files:
 - `src/lib/ledger.ts`
 - `src/lib/workspace.ts` handles Supabase-backed workspace session bootstrap, loading, and completion persistence.
 
@@ -136,14 +141,19 @@ Planned files:
 - `src/lib/ledger.ts`
 - `src/components/ledger/LedgerEventList.tsx`
 - `src/components/ledger/WorkBlockStats.tsx`
+- The compact ledger experience lives on `src/app/page.tsx` during MVP; a dedicated history route can be added later when deeper browsing is needed.
 
 ### Rewards
 
-Planned files:
+Current files:
 - `src/lib/rewards.ts`
+- `src/app/page.tsx` derives the live reward balance from ledger events and hosts subtle manual reward/work correction entry points.
+
+Planned files:
 - `src/components/rewards/RewardBalance.tsx`
 - `src/components/rewards/RewardCatalog.tsx`
 - `src/components/rewards/RewardRedemptionForm.tsx`
+- Reward balance and small redemption controls currently live on `src/app/page.tsx` as part of the home overview.
 
 ### Shared types
 
@@ -154,6 +164,12 @@ Current file:
 
 Current file:
 - `src/lib/cn.ts`
+
+### Overview layout
+
+Current files:
+- `src/components/overview/OverviewModule.tsx`
+- `src/app/page.tsx` uses the shared overview module/grid so neighboring sections align across the page.
 
 ### Supabase
 
@@ -172,6 +188,7 @@ Current files:
 - `src/components/ui/Button.tsx`
 - `src/components/ui/Card.tsx`
 - `src/components/ui/Badge.tsx`
+- `src/components/ui/Dialog.tsx`
 - `src/components/ui/StatCard.tsx`
 
 ### App shell
@@ -180,6 +197,10 @@ Current files:
 - `src/app/layout.tsx`
 - `src/app/page.tsx`
 - `src/app/globals.css`
+
+Architecture note:
+- `src/app/page.tsx` is the MVP overview surface for timer, work summary, reward balance, and compact recent ledger activity.
+- Dedicated routes are reserved for later deep-history and long-form brief/chat experiences.
 
 ### Project config
 

@@ -43,8 +43,7 @@ export function updateSession(request: NextRequest) {
     },
   );
 
-  // Trigger session hydration/refresh when middleware runs.
-  void supabase.auth.getUser();
-
-  return response;
+  // Wait for Supabase auth to finish any cookie refresh work before returning
+  // the response so deployments keep browser sessions stable.
+  return supabase.auth.getUser().then(() => response);
 }

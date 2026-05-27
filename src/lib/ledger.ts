@@ -15,6 +15,31 @@ type CompletionArtifacts = {
 
 const LOCAL_USER_ID = "local-user";
 
+export function dedupeLedgerEvents(ledgerEvents: LedgerEvent[]) {
+  const seen = new Set<string>();
+
+  return ledgerEvents.filter((event) => {
+    const metadata = event.metadata ?? {};
+    const key = [
+      event.event_type,
+      event.source,
+      event.created_at,
+      event.delta_work_blocks,
+      event.delta_reward_blocks,
+      typeof metadata.reward_name === "string" ? metadata.reward_name : "",
+      typeof metadata.duration_minutes === "number" ? metadata.duration_minutes : "",
+      typeof metadata.mode === "string" ? metadata.mode : "",
+    ].join("|");
+
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
 export function createLocalCompletionArtifacts({
   completedAt = new Date(),
   mode,

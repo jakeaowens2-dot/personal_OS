@@ -181,11 +181,13 @@ Acceptance criteria:
 
 ## Phase 3 — Ledger and Rewards
 
-### 3.1 Build ledger screen
+### 3.1 Build ledger section
 
-Status: Not started
+Status: Complete
 
-Create a ledger page showing earned/spent events.
+Note: Kept the ledger in the home overview instead of creating a separate route, extracted the recent-activity UI into `src/components/ledger/LedgerEventList.tsx`, moved ledger deduping into `src/lib/ledger.ts`, and updated the product docs/codemap to reflect the overview-first architecture. Verified with `npm run lint` and `npm run typecheck`.
+
+Create a ledger section within the home overview showing earned/spent events.
 
 Acceptance criteria:
 - Events display type, delta, source, and timestamp.
@@ -194,7 +196,9 @@ Acceptance criteria:
 
 ### 3.2 Build reward balance
 
-Status: Not started
+Status: Complete
+
+Note: Added persisted-ledger-derived reward balance calculation with weekday and weekend earning rates, negative balance support, weekend `1.5x` display state, and a compact home overview presentation. Verified with `npm run lint` and `npm run typecheck`.
 
 Calculate current reward/work balance from ledger events.
 
@@ -205,7 +209,9 @@ Acceptance criteria:
 
 ### 3.3 Add reward redemption
 
-Status: Not started
+Status: Complete
+
+Note: Added reward reporting through the home overview dialog, including persisted `reward_redemptions` and `ledger_events`, duration-based reward reporting, constrained back-in-time day selection, normalized midday timestamps for reported reward days, and immediate balance updates after save. Negative reward balance is intentionally supported. Verified with `npm run lint` and `npm run typecheck`.
 
 Allow user to redeem a reward.
 
@@ -213,13 +219,15 @@ Acceptance criteria:
 - Redemption creates a reward redemption record.
 - Redemption creates a ledger event.
 - Balance updates after redemption.
-- User cannot spend more work blocks than available.
+- User may report reward spending even when the resulting balance goes negative.
 
 ## Phase 4 — Analytics
 
 ### 4.1 Add daily and weekly stats
 
-Status: Not started
+Status: Complete
+
+Note: The home overview now shows today’s completed work blocks and this week’s work blocks using persisted data while keeping the dashboard sparse. A streak was not added. Verified with `npm run lint` and `npm run typecheck`.
 
 Show:
 - Today’s completed work blocks.
