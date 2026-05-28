@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { EmailAuthPanel, type EmailAuthPanelState } from "@/components/auth/EmailAuthPanel";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
@@ -19,11 +20,12 @@ import {
   updateTask,
 } from "@/lib/tasks";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-import { ensureWorkspaceUser } from "@/lib/workspace";
+import { AUTH_REQUIRED_MESSAGE, ensureWorkspaceUser } from "@/lib/workspace";
 import type { DailyFocusItemWithTask, Task, TaskPriority, TaskRevision, TaskStatus } from "@/lib/types";
 
 type PageState =
   | { kind: "connecting"; message: string }
+  | { kind: "auth_required"; message: string }
   | { kind: "ready"; message: string }
   | { kind: "saving"; message: string }
   | { kind: "error"; message: string };
@@ -132,7 +134,13 @@ export default function TaskSettingsPage() {
     kind: "connecting",
     message: "Connecting task vault...",
   });
+  const [authPanelState, setAuthPanelState] = useState<EmailAuthPanelState>({
+    kind: "idle",
+    message: null,
+  });
   const [workspaceUserId, setWorkspaceUserId] = useState<string | null>(null);
+  const [workspaceUserEmail, setWorkspaceUserEmail] = useState<string | null>(null);
+  const [signInEmail, setSignInEmail] = useState("");
   const [showArchived, setShowArchived] = useState(true);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [newTaskState, setNewTaskState] = useState(INITIAL_NEW_TASK_STATE);
@@ -214,6 +222,11 @@ export default function TaskSettingsPage() {
         }
 
         setWorkspaceUserId(user.id);
+        setWorkspaceUserEmail(user.email ?? null);
+        setAuthPanelState({
+          kind: "idle",
+          message: null,
+        });
         await loadTasksForUser(user.id);
         try {
           await loadDailyFocusForUser(user.id);
@@ -237,9 +250,20 @@ export default function TaskSettingsPage() {
           return;
         }
 
+        const message = error instanceof Error ? error.message : "Could not load the task vault.";
+        const needsAuth = message === AUTH_REQUIRED_MESSAGE;
+
+        setWorkspaceUserId(null);
+        setWorkspaceUserEmail(null);
+        setTasks([]);
+        setTaskRevisions([]);
+        setDailyFocusItems([]);
+        setSelectedTaskId(null);
+        setEditorState(null);
+
         setPageState({
-          kind: "error",
-          message: error instanceof Error ? error.message : "Could not load the task vault.",
+          kind: needsAuth ? "auth_required" : "error",
+          message,
         });
       }
     }
@@ -248,6 +272,71 @@ export default function TaskSettingsPage() {
 
     return () => {
       cancelled = true;
+    };
+  }, [loadDailyFocusForUser, loadTasksForUser, supabase]);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user ?? null;
+
+      if (!user) {
+        setWorkspaceUserId(null);
+        setWorkspaceUserEmail(null);
+        setTasks([]);
+        setTaskRevisions([]);
+        setDailyFocusItems([]);
+        setSelectedTaskId(null);
+        setEditorState(null);
+        setDailyFocusNotice(null);
+        setPageState({
+          kind: "auth_required",
+          message: AUTH_REQUIRED_MESSAGE,
+        });
+        return;
+      }
+
+      setWorkspaceUserId(user.id);
+      setWorkspaceUserEmail(user.email ?? null);
+      setAuthPanelState({
+        kind: "idle",
+        message: null,
+      });
+      setPageState({
+        kind: "connecting",
+        message: "Loading task vault...",
+      });
+
+      void (async () => {
+        try {
+          await loadTasksForUser(user.id);
+          try {
+            await loadDailyFocusForUser(user.id);
+          } catch (error) {
+            setDailyFocusItems([]);
+            setDailyFocusNotice(error instanceof Error ? error.message : "Could not load daily focus items.");
+          }
+
+          setPageState({
+            kind: "ready",
+            message: "Task vault ready",
+          });
+        } catch (error) {
+          setPageState({
+            kind: "error",
+            message: error instanceof Error ? error.message : "Could not load the task vault.",
+          });
+        }
+      })();
+    });
+
+    return () => {
+      subscription.unsubscribe();
     };
   }, [loadDailyFocusForUser, loadTasksForUser, supabase]);
 
@@ -588,6 +677,71 @@ export default function TaskSettingsPage() {
     }
   }
 
+  async function handleMagicLinkSignIn() {
+    if (!supabase) {
+      setAuthPanelState({
+        kind: "error",
+        message: "Supabase env vars are missing for this deployment.",
+      });
+      return;
+    }
+
+    const trimmedEmail = signInEmail.trim();
+
+    if (!trimmedEmail) {
+      setAuthPanelState({
+        kind: "error",
+        message: "Enter your email address to receive a sign-in link.",
+      });
+      return;
+    }
+
+    setAuthPanelState({
+      kind: "sending",
+      message: "Sending sign-in link...",
+    });
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: trimmedEmail,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      setAuthPanelState({
+        kind: "error",
+        message: error.message || "Could not send the sign-in link.",
+      });
+      return;
+    }
+
+    setAuthPanelState({
+      kind: "sent",
+      message: `Check ${trimmedEmail} for your sign-in link.`,
+    });
+  }
+
+  async function handleSignOut() {
+    if (!supabase) {
+      return;
+    }
+
+    setPageState({
+      kind: "connecting",
+      message: "Signing out...",
+    });
+
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setPageState({
+        kind: "error",
+        message: error.message || "Could not sign out.",
+      });
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,#fff8ef_0%,#f6f0e7_38%,#f2ebdf_100%)] px-6 py-10 sm:px-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-8">
@@ -607,21 +761,46 @@ export default function TaskSettingsPage() {
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">Task vault</h1>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Button onClick={() => setIsCreateDialogOpen(true)} size="sm">
-              New task
-            </Button>
-            <Link
-              className="text-sm text-slate-600 underline-offset-4 transition hover:text-slate-900 hover:underline"
-              href="/"
-            >
-              Back home
-            </Link>
+          <div className="flex flex-col items-start gap-3 sm:items-end">
+            {workspaceUserEmail ? (
+              <p className="text-sm text-slate-500">
+                Logged in as: <span className="font-medium text-slate-900">{workspaceUserEmail}</span>
+              </p>
+            ) : null}
+            <div className="flex items-center gap-3">
+              <Button onClick={() => setIsCreateDialogOpen(true)} disabled={!workspaceUserId} size="sm">
+                New task
+              </Button>
+              <Link
+                className="text-sm text-slate-600 underline-offset-4 transition hover:text-slate-900 hover:underline"
+                href="/"
+              >
+                Back home
+              </Link>
+              {workspaceUserId ? (
+                <button
+                  className="text-sm text-slate-600 underline-offset-4 transition hover:text-slate-900 hover:underline"
+                  onClick={() => void handleSignOut()}
+                  type="button"
+                >
+                  Sign out
+                </button>
+              ) : null}
+            </div>
           </div>
         </header>
 
         {pageState.kind === "error" ? <p className="text-sm text-rose-700">{pageState.message}</p> : null}
 
+        {!workspaceUserId ? (
+          <EmailAuthPanel
+            email={signInEmail}
+            onEmailChange={setSignInEmail}
+            onSubmit={() => void handleMagicLinkSignIn()}
+            state={authPanelState}
+            title="Sign in to open the task vault"
+          />
+        ) : (
         <section className="grid gap-6 lg:grid-cols-[19rem_minmax(0,1fr)_23rem]">
           <section className="rounded-[0.8rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-5 shadow-[0_12px_24px_rgba(15,23,42,0.06)]">
             <div className="flex items-end justify-between gap-3 border-b border-slate-200/80 pb-4">
@@ -898,6 +1077,7 @@ export default function TaskSettingsPage() {
             </section>
           </div>
         </section>
+        )}
       </div>
 
       <Dialog

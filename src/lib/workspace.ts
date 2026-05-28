@@ -1,4 +1,4 @@
-import type { SupabaseClient, User } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createLocalCompletionArtifacts } from "@/lib/ledger";
 import type {
   LedgerEvent,
@@ -49,8 +49,7 @@ type PersistWorkBlockAttributionsInput = {
   workBlockId: string;
 };
 
-const ANONYMOUS_AUTH_MESSAGE =
-  "Could not start a workspace session. Enable anonymous sign-ins in Supabase Auth to persist timer completions.";
+export const AUTH_REQUIRED_MESSAGE = "Sign in with your email to load your workspace.";
 
 function isSchemaCacheTableError(message: string) {
   const normalizedMessage = message.toLowerCase();
@@ -92,14 +91,6 @@ function toErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
-function requireUser(user: User | null) {
-  if (!user) {
-    throw new Error(ANONYMOUS_AUTH_MESSAGE);
-  }
-
-  return user;
-}
-
 export async function ensureWorkspaceUser(supabase: SupabaseClient) {
   const {
     data: { user },
@@ -110,17 +101,11 @@ export async function ensureWorkspaceUser(supabase: SupabaseClient) {
     throw new Error(toErrorMessage(error, "Could not read the current workspace session."));
   }
 
-  if (user) {
-    return user;
+  if (!user) {
+    throw new Error(AUTH_REQUIRED_MESSAGE);
   }
 
-  const anonymousSignIn = await supabase.auth.signInAnonymously();
-
-  if (anonymousSignIn.error) {
-    throw new Error(toErrorMessage(anonymousSignIn.error, ANONYMOUS_AUTH_MESSAGE));
-  }
-
-  return requireUser(anonymousSignIn.data.user);
+  return user;
 }
 
 export async function fetchWorkspaceData(supabase: SupabaseClient, userId: string): Promise<WorkspaceData> {
