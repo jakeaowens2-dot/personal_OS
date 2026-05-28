@@ -18,6 +18,8 @@ src/
       tasks/
         page.tsx
   components/
+    auth/
+      EmailAuthPanel.tsx
     ledger/
       LedgerEventList.tsx
     overview/
@@ -180,6 +182,12 @@ Task storage files:
 
 Current file:
 - `src/lib/cn.ts`
+
+### Auth UI
+
+Current files:
+- `src/components/auth/EmailAuthPanel.tsx` renders the quiet email magic-link sign-in prompt used by Home and Task Vault.
+- `src/lib/workspace.ts` now requires an existing authenticated Supabase user instead of creating anonymous users automatically.
 
 ### Overview layout
 

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
+import { EmailAuthPanel, type EmailAuthPanelState } from "@/components/auth/EmailAuthPanel";
 import { LedgerEventList } from "@/components/ledger/LedgerEventList";
 import { OverviewModule } from "@/components/overview/OverviewModule";
 import { PomodoroTimer, type TimerStatus } from "@/components/timer/PomodoroTimer";
@@ -27,6 +28,7 @@ import {
 } from "@/lib/tasks";
 import { rewardPalette, timerPalette } from "@/lib/timerPalette";
 import {
+  AUTH_REQUIRED_MESSAGE,
   ensureWorkspaceUser,
   fetchWorkspaceData,
   persistCompletedWorkSession,
@@ -51,6 +53,7 @@ const INITIAL_STATE: LocalLedgerState = {
 
 type PersistenceState =
   | { kind: "connecting"; message: string }
+  | { kind: "auth_required"; message: string }
   | { kind: "ready"; message: string }
   | { kind: "saving"; message: string }
   | { kind: "saved"; message: string }
@@ -370,6 +373,10 @@ export default function HomePage() {
     kind: "connecting",
     message: "Connecting workspace...",
   });
+  const [authPanelState, setAuthPanelState] = useState<EmailAuthPanelState>({
+    kind: "idle",
+    message: null,
+  });
   const [timerVisualState, setTimerVisualState] = useState<{
     mode: TimerMode;
     status: TimerStatus;
@@ -378,6 +385,8 @@ export default function HomePage() {
     status: "idle",
   });
   const [workspaceUserId, setWorkspaceUserId] = useState<string | null>(null);
+  const [workspaceUserEmail, setWorkspaceUserEmail] = useState<string | null>(null);
+  const [signInEmail, setSignInEmail] = useState("");
   const [dailyFocusItems, setDailyFocusItems] = useState<DailyFocusItemWithTask[]>([]);
   const [dailyFocusNotice, setDailyFocusNotice] = useState<string | null>(null);
   const [attributionDialogState, setAttributionDialogState] = useState<AttributionDialogState | null>(null);
@@ -494,6 +503,11 @@ export default function HomePage() {
         }
 
         setWorkspaceUserId(user.id);
+        setWorkspaceUserEmail(user.email ?? null);
+        setAuthPanelState({
+          kind: "idle",
+          message: null,
+        });
 
         const workspaceData = await fetchWorkspaceData(supabase, user.id);
 
@@ -524,9 +538,17 @@ export default function HomePage() {
           return;
         }
 
+        const message = error instanceof Error ? error.message : "Could not connect the workspace.";
+        const needsAuth = message === AUTH_REQUIRED_MESSAGE;
+
+        setWorkspaceUserId(null);
+        setWorkspaceUserEmail(null);
+        setLocalLedgerState(INITIAL_STATE);
+        setDailyFocusItems([]);
+
         setPersistenceState({
-          kind: "error",
-          message: error instanceof Error ? error.message : "Could not connect the workspace.",
+          kind: needsAuth ? "auth_required" : "error",
+          message,
         });
       }
     }
@@ -535,6 +557,72 @@ export default function HomePage() {
 
     return () => {
       cancelled = true;
+    };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user ?? null;
+
+      if (!user) {
+        handledCompletionKeysRef.current.clear();
+        setWorkspaceUserId(null);
+        setWorkspaceUserEmail(null);
+        setLocalLedgerState(INITIAL_STATE);
+        setDailyFocusItems([]);
+        setDailyFocusNotice(null);
+        setPersistenceState({
+          kind: "auth_required",
+          message: AUTH_REQUIRED_MESSAGE,
+        });
+        return;
+      }
+
+      setWorkspaceUserId(user.id);
+      setWorkspaceUserEmail(user.email ?? null);
+      setAuthPanelState({
+        kind: "idle",
+        message: null,
+      });
+      setPersistenceState({
+        kind: "connecting",
+        message: "Loading workspace...",
+      });
+
+      void fetchWorkspaceData(supabase, user.id)
+        .then(async (workspaceData) => {
+          setLocalLedgerState(workspaceData);
+
+          try {
+            const focusItems = await fetchDailyFocusItems(supabase, user.id);
+            setDailyFocusItems(focusItems);
+            setDailyFocusNotice(null);
+          } catch (error) {
+            setDailyFocusItems([]);
+            setDailyFocusNotice(error instanceof Error ? error.message : "Could not load daily focus items.");
+          }
+
+          setPersistenceState({
+            kind: "ready",
+            message: "Workspace connected",
+          });
+        })
+        .catch((error) => {
+          setPersistenceState({
+            kind: "error",
+            message: error instanceof Error ? error.message : "Could not load the workspace.",
+          });
+        });
+    });
+
+    return () => {
+      subscription.unsubscribe();
     };
   }, [supabase]);
 
@@ -1032,6 +1120,71 @@ export default function HomePage() {
     return selections;
   };
 
+  const handleMagicLinkSignIn = async () => {
+    if (!supabase) {
+      setAuthPanelState({
+        kind: "error",
+        message: "Supabase env vars are missing for this deployment.",
+      });
+      return;
+    }
+
+    const trimmedEmail = signInEmail.trim();
+
+    if (!trimmedEmail) {
+      setAuthPanelState({
+        kind: "error",
+        message: "Enter your email address to receive a sign-in link.",
+      });
+      return;
+    }
+
+    setAuthPanelState({
+      kind: "sending",
+      message: "Sending sign-in link...",
+    });
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: trimmedEmail,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      setAuthPanelState({
+        kind: "error",
+        message: error.message || "Could not send the sign-in link.",
+      });
+      return;
+    }
+
+    setAuthPanelState({
+      kind: "sent",
+      message: `Check ${trimmedEmail} for your sign-in link.`,
+    });
+  };
+
+  const handleSignOut = async () => {
+    if (!supabase) {
+      return;
+    }
+
+    setPersistenceState({
+      kind: "connecting",
+      message: "Signing out...",
+    });
+
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error.message || "Could not sign out.",
+      });
+    }
+  };
+
   const handleSaveWorkAttribution = async () => {
     if (!supabase || !workspaceUserId || !attributionDialogState) {
       return;
@@ -1102,6 +1255,11 @@ export default function HomePage() {
             </p>
           </div>
           <div className="flex flex-col items-start gap-3 sm:items-end">
+            {workspaceUserEmail ? (
+              <p className="text-sm text-slate-500">
+                Logged in as: <span className="font-medium text-slate-900">{workspaceUserEmail}</span>
+              </p>
+            ) : null}
             <Badge className="normal-case tracking-normal" tone="neutral">
               {persistenceState.message}
             </Badge>
@@ -1116,6 +1274,15 @@ export default function HomePage() {
                 >
                   Task vault
                 </Link>
+                {workspaceUserId ? (
+                  <button
+                    className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
+                    onClick={() => void handleSignOut()}
+                    type="button"
+                  >
+                    Sign out
+                  </button>
+                ) : null}
               </div>
             </details>
           </div>
@@ -1125,12 +1292,21 @@ export default function HomePage() {
           <p className="text-sm text-rose-700">{persistenceState.message}</p>
         ) : null}
 
-        <PomodoroTimer
-          onComplete={handleTimerComplete}
-          onStateChange={setTimerVisualState}
-        />
+        {!workspaceUserId ? (
+          <EmailAuthPanel
+            email={signInEmail}
+            onEmailChange={setSignInEmail}
+            onSubmit={() => void handleMagicLinkSignIn()}
+            state={authPanelState}
+          />
+        ) : (
+          <>
+            <PomodoroTimer
+              onComplete={handleTimerComplete}
+              onStateChange={setTimerVisualState}
+            />
 
-        <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-5 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
+            <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-5 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="space-y-1">
               <p className="text-sm font-medium text-slate-900">Today&apos;s focus</p>
@@ -1305,8 +1481,10 @@ export default function HomePage() {
               }
               title="Recent activity"
             />
-          </section>
-        </section>
+              </section>
+            </section>
+          </>
+        )}
       </div>
 
       <Dialog
