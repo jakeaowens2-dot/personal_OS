@@ -50,6 +50,19 @@ function getEventTitle(event: LedgerEvent) {
   return "Completed focus block";
 }
 
+function getEventDetail(event: LedgerEvent) {
+  if (event.event_type === "work_earned") {
+    const attributionSummary =
+      typeof event.metadata?.attribution_summary === "string" ? event.metadata.attribution_summary : null;
+
+    if (attributionSummary) {
+      return `${formatTimestamp(event.created_at)} on ${attributionSummary} via ${formatSource(event.source)}`;
+    }
+  }
+
+  return `${formatTimestamp(event.created_at)} via ${formatSource(event.source)}`;
+}
+
 function getDeltaLabel(event: LedgerEvent) {
   if (event.delta_work_blocks !== 0) {
     const count = Math.abs(event.delta_work_blocks);
@@ -101,9 +114,7 @@ export function LedgerEventList({
             </div>
             <div>
               <p className="font-medium text-slate-900">{getEventTitle(event)}</p>
-              <p className="mt-1 text-sm text-slate-600">
-                {formatTimestamp(event.created_at)} via {formatSource(event.source)}
-              </p>
+              <p className="mt-1 text-sm text-slate-600">{getEventDetail(event)}</p>
             </div>
           </div>
           <span

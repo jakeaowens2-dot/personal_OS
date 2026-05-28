@@ -14,6 +14,9 @@ src/
     globals.css
     layout.tsx
     page.tsx
+    settings/
+      tasks/
+        page.tsx
   components/
     ledger/
       LedgerEventList.tsx
@@ -33,12 +36,14 @@ src/
     cn.ts
     ledger.ts
     rewards.ts
+    tasks.ts
     supabase/
       client.ts
       middleware.ts
       server.ts
     workspace.ts
     timer.ts
+    timerPalette.ts
     types.ts
   proxy.ts
 
@@ -51,12 +56,16 @@ tsconfig.json
 tsconfig.typecheck.json
 
 docs/
-  PRODUCT_SPEC.md
-  TASKS.md
+  PRODUCT_SPEC.updated.md
+  STYLE_GUIDE.md
+  TASKS.updated.md
 
 supabase/
   migrations/
     20260520233500_initial_schema.sql
+    20260528001500_add_tasks_and_revisions.sql
+    20260528011500_add_daily_focus.sql
+    20260528023000_add_work_block_attributions.sql
 ```
 
 ## Planned Structure
@@ -116,12 +125,13 @@ supabase/
 ### Product behavior
 
 Read:
-- `docs/PRODUCT_SPEC.md`
+- `docs/PRODUCT_SPEC.updated.md`
+- `docs/STYLE_GUIDE.md`
 
 ### Task sequencing
 
 Read:
-- `docs/TASKS.md`
+- `docs/TASKS.updated.md`
 
 ### Timer UI
 
@@ -130,12 +140,14 @@ Current files:
 - `src/components/timer/TimerControls.tsx`
 - `src/components/timer/TimerModeTabs.tsx`
 - `src/lib/timer.ts`
+- `src/lib/timerPalette.ts`
 
 ### Ledger behavior
 
 Current files:
 - `src/lib/ledger.ts`
 - `src/lib/workspace.ts` handles Supabase-backed workspace session bootstrap, loading, and completion persistence.
+- `src/lib/workspace.ts` also persists post-completion work-block attribution and updates ledger metadata with readable task summaries.
 
 Planned files:
 - `src/lib/ledger.ts`
@@ -160,6 +172,10 @@ Planned files:
 Current file:
 - `src/lib/types.ts`
 
+Task storage files:
+- `src/lib/tasks.ts` handles canonical task CRUD, task sorting, and revision fetching.
+- `src/lib/tasks.ts` also manages the daily focus list used by the home page and task vault.
+
 ### Shared UI helpers
 
 Current file:
@@ -178,6 +194,9 @@ Current files:
 - `src/lib/supabase/server.ts`
 - `src/lib/supabase/middleware.ts`
 - `src/proxy.ts`
+- `supabase/migrations/20260528001500_add_tasks_and_revisions.sql` adds canonical tasks plus durable task revision history.
+- `supabase/migrations/20260528011500_add_daily_focus.sql` adds the lightweight daily focus list that references canonical tasks.
+- `supabase/migrations/20260528023000_add_work_block_attributions.sql` adds durable per-task work-block attribution for post-completion task assignment.
 
 Planned files:
 - `supabase/migrations/*`
@@ -197,6 +216,8 @@ Current files:
 - `src/app/layout.tsx`
 - `src/app/page.tsx`
 - `src/app/globals.css`
+- `src/app/settings/tasks/page.tsx` is the quiet task vault for creating, editing, completing, archiving, and auditing canonical tasks.
+- `src/app/page.tsx` now also shows the compact daily focus list and links back to the task vault for management.
 
 Architecture note:
 - `src/app/page.tsx` is the MVP overview surface for timer, work summary, reward balance, and compact recent ledger activity.

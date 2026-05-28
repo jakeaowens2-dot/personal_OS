@@ -7,6 +7,7 @@ import type {
   TimerMode,
   TimerSession,
   WorkBlock,
+  WorkBlockAttribution,
 } from "@/lib/types";
 
 export type WorkspaceData = {
@@ -37,8 +38,32 @@ type PersistRewardSpendInput = {
   userId: string;
 };
 
+type PersistWorkBlockAttributionsInput = {
+  durationMinutes: number;
+  ledgerEvent: LedgerEvent;
+  selections: Array<{
+    label: string;
+    taskId: string;
+  }>;
+  userId: string;
+  workBlockId: string;
+};
+
 const ANONYMOUS_AUTH_MESSAGE =
   "Could not start a workspace session. Enable anonymous sign-ins in Supabase Auth to persist timer completions.";
+
+function isSchemaCacheTableError(message: string) {
+  const normalizedMessage = message.toLowerCase();
+  return normalizedMessage.includes("schema cache") && normalizedMessage.includes("public.");
+}
+
+function enhanceWorkspaceError(message: string, tableLabel: string) {
+  if (isSchemaCacheTableError(message)) {
+    return `Supabase cannot see the ${tableLabel} tables yet. Apply the latest migrations to refresh the schema cache, then reload the app.`;
+  }
+
+  return message;
+}
 
 function isMissingSessionError(error: unknown) {
   const message = toErrorMessage(error, "").toLowerCase();
@@ -326,5 +351,95 @@ export async function persistRewardSpend(
   return {
     ledgerEvent,
     rewardRedemption,
+  };
+}
+
+function buildAttributionSummary(labels: string[]) {
+  if (labels.length === 0) {
+    return null;
+  }
+
+  if (labels.length === 1) {
+    return labels[0];
+  }
+
+  if (labels.length === 2) {
+    return `${labels[0]} and ${labels[1]}`;
+  }
+
+  return `${labels[0]} + ${labels.length - 1} more`;
+}
+
+export async function persistWorkBlockAttributions(
+  supabase: SupabaseClient,
+  { durationMinutes, ledgerEvent, selections, userId, workBlockId }: PersistWorkBlockAttributionsInput,
+) {
+  const shareCount = selections.length;
+
+  if (shareCount === 0) {
+    throw new Error("Choose at least one task or category for this work block.");
+  }
+
+  const baseMinutes = Math.floor(durationMinutes / shareCount);
+  const remainderMinutes = durationMinutes % shareCount;
+
+  const attributions: WorkBlockAttribution[] = selections.map((selection, index) => ({
+    id: crypto.randomUUID(),
+    user_id: userId,
+    work_block_id: workBlockId,
+    task_id: selection.taskId,
+    attribution_label: selection.label,
+    share_ratio: 1 / shareCount,
+    attributed_minutes: baseMinutes + (index < remainderMinutes ? 1 : 0),
+    created_at: ledgerEvent.created_at,
+  }));
+
+  const { error: insertError } = await supabase
+    .from("work_block_attributions")
+    .insert(attributions);
+
+  if (insertError) {
+    throw new Error(
+      enhanceWorkspaceError(
+        toErrorMessage(insertError, "Could not save the work block attribution."),
+        "work attribution",
+      ),
+    );
+  }
+
+  const attributionLabels = selections.map((selection) => selection.label);
+  const attributionSummary = buildAttributionSummary(attributionLabels);
+  const updatedLedgerMetadata = {
+    ...(ledgerEvent.metadata ?? {}),
+    attribution_count: selections.length,
+    attribution_labels: attributionLabels,
+    attribution_summary: attributionSummary,
+    attributed_minutes: durationMinutes,
+    attributed_task_ids: selections.map((selection) => selection.taskId),
+  };
+
+  const { error: ledgerEventError } = await supabase
+    .from("ledger_events")
+    .update({
+      metadata: updatedLedgerMetadata,
+    })
+    .eq("id", ledgerEvent.id)
+    .eq("user_id", userId);
+
+  if (ledgerEventError) {
+    throw new Error(
+      enhanceWorkspaceError(
+        toErrorMessage(ledgerEventError, "Could not update the work ledger event with task attribution."),
+        "work attribution",
+      ),
+    );
+  }
+
+  return {
+    attributions,
+    ledgerEvent: {
+      ...ledgerEvent,
+      metadata: updatedLedgerMetadata,
+    },
   };
 }

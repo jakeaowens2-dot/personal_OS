@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 import { LedgerEventList } from "@/components/ledger/LedgerEventList";
 import { OverviewModule } from "@/components/overview/OverviewModule";
@@ -18,6 +19,12 @@ import {
   WEEKEND_REWARD_MULTIPLIER_LABEL,
 } from "@/lib/rewards";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import {
+  createTask,
+  ensureHousekeepingTask,
+  fetchDailyFocusItems,
+  fetchMostRecentAttributedTaskId,
+} from "@/lib/tasks";
 import { rewardPalette, timerPalette } from "@/lib/timerPalette";
 import {
   ensureWorkspaceUser,
@@ -25,8 +32,10 @@ import {
   persistCompletedWorkSession,
   persistManualWorkBlock,
   persistRewardSpend,
+  persistWorkBlockAttributions,
 } from "@/lib/workspace";
-import type { LedgerEvent, TimerMode, TimerSession, WorkBlock } from "@/lib/types";
+import { archiveTask, completeTask, removeTaskFromDailyFocus } from "@/lib/tasks";
+import type { DailyFocusItemWithTask, LedgerEvent, Task, TimerMode, TimerSession, WorkBlock } from "@/lib/types";
 
 type LocalLedgerState = {
   ledgerEvents: LedgerEvent[];
@@ -46,6 +55,18 @@ type PersistenceState =
   | { kind: "saving"; message: string }
   | { kind: "saved"; message: string }
   | { kind: "error"; message: string };
+
+type AttributionSelectionState = {
+  choresTask: Task;
+  otherSelected: boolean;
+  otherTitle: string;
+  selectedTaskIds: string[];
+};
+
+type AttributionDialogState = AttributionSelectionState & {
+  ledgerEvent: LedgerEvent;
+  workBlock: WorkBlock;
+};
 
 function isToday(isoTimestamp: string) {
   const now = new Date();
@@ -174,6 +195,111 @@ function ActionField({ label, className, ...props }: ActionFieldProps) {
   );
 }
 
+function inputClassName() {
+  return "h-11 w-full rounded-[0.8rem] border border-slate-300/80 bg-white/80 px-4 text-sm text-slate-900 outline-none transition focus:border-slate-400";
+}
+
+type AttributionFieldsProps = {
+  choresTask: Task;
+  dailyFocusItems: DailyFocusItemWithTask[];
+  durationMinutes: number;
+  emptyStateMessage: string;
+  onOtherSelectedChange: (checked: boolean) => void;
+  onOtherTitleChange: (value: string) => void;
+  onToggleTask: (taskId: string) => void;
+  otherSelected: boolean;
+  otherTitle: string;
+  selectedTaskIds: string[];
+};
+
+function AttributionFields({
+  choresTask,
+  dailyFocusItems,
+  durationMinutes,
+  emptyStateMessage,
+  onOtherSelectedChange,
+  onOtherTitleChange,
+  onToggleTask,
+  otherSelected,
+  otherTitle,
+  selectedTaskIds,
+}: AttributionFieldsProps) {
+  return (
+    <div className="space-y-5">
+      <div className="space-y-3">
+        {dailyFocusItems.length > 0 ? (
+          dailyFocusItems.map((item) => {
+            const checked = selectedTaskIds.includes(item.task.id);
+
+            return (
+              <label
+                key={item.id}
+                className="flex items-start gap-3 rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3"
+              >
+                <input
+                  checked={checked}
+                  className="mt-1 h-4 w-4 accent-[var(--accent)]"
+                  onChange={() => onToggleTask(item.task.id)}
+                  type="checkbox"
+                />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-slate-950">{item.task.title}</p>
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                    {item.task.priority}
+                    {item.task.area ? ` · ${item.task.area}` : ""}
+                  </p>
+                </div>
+              </label>
+            );
+          })
+        ) : (
+          <p className="text-sm text-slate-500">{emptyStateMessage}</p>
+        )}
+      </div>
+
+      <label className="flex items-start gap-3 rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
+        <input
+          checked={selectedTaskIds.includes(choresTask.id)}
+          className="mt-1 h-4 w-4 accent-[var(--accent)]"
+          onChange={() => onToggleTask(choresTask.id)}
+          type="checkbox"
+        />
+        <div className="space-y-1">
+          <p className="text-sm font-medium text-slate-950">{choresTask.title}</p>
+          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">always available</p>
+        </div>
+      </label>
+
+      <div className="space-y-3 rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
+        <label className="flex items-start gap-3">
+          <input
+            checked={otherSelected}
+            className="mt-1 h-4 w-4 accent-[var(--accent)]"
+            onChange={(event) => onOtherSelectedChange(event.target.checked)}
+            type="checkbox"
+          />
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-slate-950">Other</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">create a canonical task</p>
+          </div>
+        </label>
+        {otherSelected ? (
+          <input
+            className={inputClassName()}
+            onChange={(event) => onOtherTitleChange(event.target.value)}
+            placeholder="Name the work you just did"
+            value={otherTitle}
+          />
+        ) : null}
+      </div>
+
+      <p className="border-t border-slate-200/80 pt-4 text-sm text-slate-500">
+        Selected tasks will split {durationMinutes} minutes evenly.
+      </p>
+    </div>
+  );
+}
+
 type BlockMeterProps = {
   color: "reward" | "reward_negative" | "work";
   count: number;
@@ -252,6 +378,10 @@ export default function HomePage() {
     status: "idle",
   });
   const [workspaceUserId, setWorkspaceUserId] = useState<string | null>(null);
+  const [dailyFocusItems, setDailyFocusItems] = useState<DailyFocusItemWithTask[]>([]);
+  const [dailyFocusNotice, setDailyFocusNotice] = useState<string | null>(null);
+  const [attributionDialogState, setAttributionDialogState] = useState<AttributionDialogState | null>(null);
+  const [manualAttributionState, setManualAttributionState] = useState<AttributionSelectionState | null>(null);
   const [manualWorkMinutes, setManualWorkMinutes] = useState("50");
   const [manualWorkNote, setManualWorkNote] = useState("");
   const [isManualDialogOpen, setIsManualDialogOpen] = useState(false);
@@ -319,6 +449,11 @@ export default function HomePage() {
     [dedupedLedgerEvents],
   );
 
+  const visibleDailyFocusItems = useMemo(
+    () => dailyFocusItems.slice(0, 5),
+    [dailyFocusItems],
+  );
+
   const pageToneClass = useMemo(() => {
     if (timerVisualState.status !== "running") {
       return "radial-gradient(circle at top, #fff7ee 0%, #f6f0e7 40%, #f3ede4 100%)";
@@ -367,6 +502,19 @@ export default function HomePage() {
         }
 
         setLocalLedgerState(workspaceData);
+        try {
+          const focusItems = await fetchDailyFocusItems(supabase, user.id);
+
+          if (!cancelled) {
+            setDailyFocusItems(focusItems);
+            setDailyFocusNotice(null);
+          }
+        } catch (error) {
+          if (!cancelled) {
+            setDailyFocusItems([]);
+            setDailyFocusNotice(error instanceof Error ? error.message : "Could not load daily focus items.");
+          }
+        }
         setPersistenceState({
           kind: "ready",
           message: "Workspace connected",
@@ -389,6 +537,103 @@ export default function HomePage() {
       cancelled = true;
     };
   }, [supabase]);
+
+  const reloadDailyFocusItems = async (userId: string) => {
+    if (!supabase) {
+      return;
+    }
+
+    try {
+      const focusItems = await fetchDailyFocusItems(supabase, userId);
+      setDailyFocusItems(focusItems);
+      setDailyFocusNotice(null);
+    } catch (error) {
+      setDailyFocusNotice(error instanceof Error ? error.message : "Could not load daily focus items.");
+      setDailyFocusItems([]);
+    }
+  };
+
+  const prepareAttributionSelectionState = async (): Promise<AttributionSelectionState> => {
+    if (!supabase || !workspaceUserId) {
+      throw new Error("Workspace is not connected yet. Wait for the connection to finish before attributing work.");
+    }
+
+    const [focusItems, choresTask, mostRecentTaskId] = await Promise.all([
+      fetchDailyFocusItems(supabase, workspaceUserId),
+      ensureHousekeepingTask(supabase, workspaceUserId),
+      fetchMostRecentAttributedTaskId(supabase, workspaceUserId),
+    ]);
+
+    setDailyFocusItems(focusItems);
+    setDailyFocusNotice(null);
+
+    const defaultTaskId = focusItems.some((item) => item.task_id === mostRecentTaskId)
+      ? mostRecentTaskId
+      : focusItems[0]?.task_id ?? choresTask.id;
+
+    return {
+      choresTask,
+      otherSelected: false,
+      otherTitle: "",
+      selectedTaskIds: defaultTaskId ? [defaultTaskId] : [],
+    };
+  };
+
+  const openAttributionDialog = async ({
+    ledgerEvent,
+    workBlock,
+  }: {
+    ledgerEvent: LedgerEvent;
+    workBlock: WorkBlock;
+  }) => {
+    try {
+      const selectionState = await prepareAttributionSelectionState();
+      setAttributionDialogState({
+        ledgerEvent,
+        workBlock,
+        ...selectionState,
+      });
+      setPersistenceState({
+        kind: "saved",
+        message: "Latest work block saved. Attribute it to keep task history useful.",
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not prepare work attribution.",
+      });
+    }
+  };
+
+  const openManualWorkDialog = async () => {
+    if (!supabase || !workspaceUserId) {
+      setPersistenceState({
+        kind: "error",
+        message: "Workspace is not connected yet. Wait for the connection to finish before adding work.",
+      });
+      return;
+    }
+
+    setPersistenceState({
+      kind: "saving",
+      message: "Preparing manual work entry...",
+    });
+
+    try {
+      const selectionState = await prepareAttributionSelectionState();
+      setManualAttributionState(selectionState);
+      setIsManualDialogOpen(true);
+      setPersistenceState({
+        kind: "ready",
+        message: "Workspace connected",
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not prepare manual work attribution.",
+      });
+    }
+  };
 
   const handleTimerComplete = async ({
     completedAt,
@@ -447,9 +692,9 @@ export default function HomePage() {
           ? current.workBlocks
           : [artifacts.workBlock, ...current.workBlocks],
       }));
-      setPersistenceState({
-        kind: "saved",
-        message: "Latest work block saved",
+      await openAttributionDialog({
+        ledgerEvent: artifacts.ledgerEvent,
+        workBlock: artifacts.workBlock,
       });
     } catch (error) {
       handledCompletionKeysRef.current.delete(completionKey);
@@ -463,7 +708,7 @@ export default function HomePage() {
   const handleManualWorkAdd = async () => {
     const durationMinutes = Number.parseInt(manualWorkMinutes, 10);
 
-    if (!supabase || !workspaceUserId) {
+    if (!supabase || !workspaceUserId || !manualAttributionState) {
       setPersistenceState({
         kind: "error",
         message: "Workspace is not connected yet. Wait for the connection to finish before adding work.",
@@ -479,9 +724,19 @@ export default function HomePage() {
       return;
     }
 
+    const validationMessage = getAttributionValidationMessage(manualAttributionState);
+
+    if (validationMessage) {
+      setPersistenceState({
+        kind: "error",
+        message: validationMessage,
+      });
+      return;
+    }
+
     setPersistenceState({
       kind: "saving",
-      message: "Saving manual work block...",
+      message: "Saving manual work block and attribution...",
     });
 
     try {
@@ -492,16 +747,34 @@ export default function HomePage() {
         userId: workspaceUserId,
       });
 
+      const selections = await buildAttributionSelections({
+        actorLabel: "Manual work",
+        humanSummary: "Captured from manual work dialog.",
+        reason: "Created from manual work attribution",
+        selectionState: manualAttributionState,
+      });
+
+      const attributionResult = await persistWorkBlockAttributions(supabase, {
+        durationMinutes,
+        ledgerEvent: artifacts.ledgerEvent,
+        selections,
+        userId: workspaceUserId,
+        workBlockId: artifacts.workBlock.id,
+      });
+
       setLocalLedgerState((current) => ({
-        ledgerEvents: [artifacts.ledgerEvent, ...current.ledgerEvents],
+        ledgerEvents: [attributionResult.ledgerEvent, ...current.ledgerEvents],
         timerSessions: [artifacts.timerSession, ...current.timerSessions],
         workBlocks: [artifacts.workBlock, ...current.workBlocks],
       }));
+      await reloadDailyFocusItems(workspaceUserId);
       setManualWorkNote("");
+      setManualWorkMinutes("50");
+      setManualAttributionState(null);
       setIsManualDialogOpen(false);
       setPersistenceState({
         kind: "saved",
-        message: "Manual work block saved",
+        message: "Manual work block saved and attributed",
       });
     } catch (error) {
       setPersistenceState({
@@ -573,6 +846,248 @@ export default function HomePage() {
     }
   };
 
+  const handleCompleteDailyFocusTask = async (item: DailyFocusItemWithTask) => {
+    if (!supabase || !workspaceUserId) {
+      return;
+    }
+
+    setPersistenceState({
+      kind: "saving",
+      message: "Completing today task...",
+    });
+
+    try {
+      await completeTask(supabase, item.task, { label: "Daily focus", type: "human" }, workspaceUserId);
+      await removeTaskFromDailyFocus(supabase, item.id);
+      await reloadDailyFocusItems(workspaceUserId);
+      setPersistenceState({
+        kind: "saved",
+        message: "Today task completed",
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not complete the today task.",
+      });
+    }
+  };
+
+  const handleArchiveDailyFocusTask = async (item: DailyFocusItemWithTask) => {
+    if (!supabase || !workspaceUserId) {
+      return;
+    }
+
+    setPersistenceState({
+      kind: "saving",
+      message: "Archiving today task...",
+    });
+
+    try {
+      await archiveTask(supabase, item.task, { label: "Daily focus", type: "human" }, workspaceUserId);
+      await removeTaskFromDailyFocus(supabase, item.id);
+      await reloadDailyFocusItems(workspaceUserId);
+      setPersistenceState({
+        kind: "saved",
+        message: "Today task archived",
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not archive the today task.",
+      });
+    }
+  };
+
+  const handleDeferDailyFocusTask = async (itemId: string) => {
+    if (!supabase || !workspaceUserId) {
+      return;
+    }
+
+    setPersistenceState({
+      kind: "saving",
+      message: "Updating today list...",
+    });
+
+    try {
+      await removeTaskFromDailyFocus(supabase, itemId);
+      await reloadDailyFocusItems(workspaceUserId);
+      setPersistenceState({
+        kind: "saved",
+        message: "Today list updated",
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not update the today list.",
+      });
+    }
+  };
+
+  const toggleAttributionTask = (taskId: string) => {
+    setAttributionDialogState((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const selectedTaskIds = current.selectedTaskIds.includes(taskId)
+        ? current.selectedTaskIds.filter((selectedTaskId) => selectedTaskId !== taskId)
+        : [...current.selectedTaskIds, taskId];
+
+      return {
+        ...current,
+        selectedTaskIds,
+      };
+    });
+  };
+
+  const toggleManualAttributionTask = (taskId: string) => {
+    setManualAttributionState((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const selectedTaskIds = current.selectedTaskIds.includes(taskId)
+        ? current.selectedTaskIds.filter((selectedTaskId) => selectedTaskId !== taskId)
+        : [...current.selectedTaskIds, taskId];
+
+      return {
+        ...current,
+        selectedTaskIds,
+      };
+    });
+  };
+
+  const getAttributionValidationMessage = (selectionState: AttributionSelectionState) => {
+    const trimmedOtherTitle = selectionState.otherTitle.trim();
+
+    if (selectionState.selectedTaskIds.length === 0 && !selectionState.otherSelected) {
+      return "Choose at least one task, chores/housekeeping, or other before saving attribution.";
+    }
+
+    if (selectionState.otherSelected && !trimmedOtherTitle) {
+      return "Give the “other” work a short task title before saving attribution.";
+    }
+
+    return null;
+  };
+
+  const buildAttributionSelections = async ({
+    actorLabel,
+    humanSummary,
+    reason,
+    selectionState,
+  }: {
+    actorLabel: string;
+    humanSummary: string;
+    reason: string;
+    selectionState: AttributionSelectionState;
+  }) => {
+    if (!supabase || !workspaceUserId) {
+      throw new Error("Workspace is not connected yet. Wait for the connection to finish before attributing work.");
+    }
+
+    const selectedTasks = dailyFocusItems
+      .map((item) => item.task)
+      .filter((task, index, tasks) =>
+        selectionState.selectedTaskIds.includes(task.id) &&
+        tasks.findIndex((candidate) => candidate.id === task.id) === index,
+      );
+
+    const choresSelected = selectionState.selectedTaskIds.includes(selectionState.choresTask.id);
+    const selections = selectedTasks.map((task) => ({
+      label: task.title,
+      taskId: task.id,
+    }));
+
+    if (
+      choresSelected &&
+      !selections.some((selection) => selection.taskId === selectionState.choresTask.id)
+    ) {
+      selections.push({
+        label: selectionState.choresTask.title,
+        taskId: selectionState.choresTask.id,
+      });
+    }
+
+    if (selectionState.otherSelected) {
+      const createdTask = await createTask(supabase, {
+        actor: {
+          label: actorLabel,
+          type: "human",
+        },
+        humanSummary,
+        priority: "medium",
+        reason,
+        source: "attribution_capture",
+        title: selectionState.otherTitle.trim(),
+        userId: workspaceUserId,
+      });
+
+      selections.push({
+        label: createdTask.title,
+        taskId: createdTask.id,
+      });
+    }
+
+    return selections;
+  };
+
+  const handleSaveWorkAttribution = async () => {
+    if (!supabase || !workspaceUserId || !attributionDialogState) {
+      return;
+    }
+
+    const validationMessage = getAttributionValidationMessage(attributionDialogState);
+
+    if (validationMessage) {
+      setPersistenceState({
+        kind: "error",
+        message: validationMessage,
+      });
+      return;
+    }
+
+    setPersistenceState({
+      kind: "saving",
+      message: "Saving work attribution...",
+    });
+
+    try {
+      const selections = await buildAttributionSelections({
+        actorLabel: "Work attribution",
+        humanSummary: "Captured from post-work-block attribution.",
+        reason: "Created from work attribution dialog",
+        selectionState: attributionDialogState,
+      });
+
+      const result = await persistWorkBlockAttributions(supabase, {
+        durationMinutes: attributionDialogState.workBlock.duration_minutes,
+        ledgerEvent: attributionDialogState.ledgerEvent,
+        selections,
+        userId: workspaceUserId,
+        workBlockId: attributionDialogState.workBlock.id,
+      });
+
+      setLocalLedgerState((current) => ({
+        ...current,
+        ledgerEvents: current.ledgerEvents.map((event) =>
+          event.id === result.ledgerEvent.id ? result.ledgerEvent : event,
+        ),
+      }));
+      await reloadDailyFocusItems(workspaceUserId);
+      setAttributionDialogState(null);
+      setPersistenceState({
+        kind: "saved",
+        message: "Work block attributed",
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not save the work attribution.",
+      });
+    }
+  };
+
   return (
     <main className="min-h-screen transition-colors duration-500" style={{ background: pageToneClass }}>
       <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-6 py-10 sm:py-14">
@@ -586,9 +1101,24 @@ export default function HomePage() {
               One quiet workspace for focus, recovery, and a visible work loop.
             </p>
           </div>
-          <Badge className="normal-case tracking-normal" tone="neutral">
-            {persistenceState.message}
-          </Badge>
+          <div className="flex flex-col items-start gap-3 sm:items-end">
+            <Badge className="normal-case tracking-normal" tone="neutral">
+              {persistenceState.message}
+            </Badge>
+            <details className="group relative">
+              <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.18em] text-slate-400 transition hover:text-slate-600">
+                Settings
+              </summary>
+              <div className="absolute right-0 top-6 z-20 min-w-40 rounded-2xl border border-slate-200/90 bg-[var(--surface)]/95 p-2 shadow-[0_16px_32px_rgba(15,23,42,0.12)]">
+                <Link
+                  className="block rounded-xl px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
+                  href="/settings/tasks"
+                >
+                  Task vault
+                </Link>
+              </div>
+            </details>
+          </div>
         </header>
 
         {persistenceState.kind === "error" ? (
@@ -600,12 +1130,83 @@ export default function HomePage() {
           onStateChange={setTimerVisualState}
         />
 
+        <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-5 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-slate-900">Today&apos;s focus</p>
+              <p className="text-sm text-slate-500">
+                A small ordered list of the work that matters today.
+              </p>
+            </div>
+            <Link
+              className="text-sm text-slate-500 underline-offset-4 transition hover:text-slate-900 hover:underline"
+              href="/settings/tasks"
+            >
+              Edit list
+            </Link>
+          </div>
+
+          {dailyFocusNotice ? (
+            <p className="mt-4 text-sm text-rose-700">{dailyFocusNotice}</p>
+          ) : dailyFocusItems.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">
+              No tasks are on today&apos;s list yet. Add a few from the task vault when you&apos;re ready.
+            </p>
+          ) : (
+            <div className="mt-4 grid gap-3">
+              {visibleDailyFocusItems.map((item, index) => (
+                <div
+                  key={item.id}
+                  className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white/70 px-4 py-3 sm:flex-row sm:items-start sm:justify-between"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs uppercase tracking-[0.18em] text-slate-400">{index + 1}</span>
+                      <p className="text-sm font-semibold text-slate-950">{item.task.title}</p>
+                    </div>
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                      {item.task.priority}
+                      {item.task.area ? ` · ${item.task.area}` : ""}
+                    </p>
+                    {item.task.human_summary ? (
+                      <p className="text-sm leading-6 text-slate-600">{item.task.human_summary}</p>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-sm">
+                    <button
+                      className="text-slate-500 underline-offset-4 transition hover:text-slate-900 hover:underline"
+                      onClick={() => void handleCompleteDailyFocusTask(item)}
+                      type="button"
+                    >
+                      Done
+                    </button>
+                    <button
+                      className="text-slate-500 underline-offset-4 transition hover:text-slate-900 hover:underline"
+                      onClick={() => void handleArchiveDailyFocusTask(item)}
+                      type="button"
+                    >
+                      Archive
+                    </button>
+                    <button
+                      className="text-slate-500 underline-offset-4 transition hover:text-slate-900 hover:underline"
+                      onClick={() => void handleDeferDailyFocusTask(item.id)}
+                      type="button"
+                    >
+                      Later
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
         <section className="grid gap-6 pt-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_22rem] lg:items-start">
           <section className="lg:col-span-2 rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
             <div className="grid gap-8 md:grid-cols-2 md:gap-0">
               <OverviewModule
                 action={
-                  <Button onClick={() => setIsManualDialogOpen(true)} size="inline" variant="text">
+                  <Button onClick={() => void openManualWorkDialog()} size="inline" variant="text">
                     Add manually
                   </Button>
                 }
@@ -709,29 +1310,58 @@ export default function HomePage() {
       </div>
 
       <Dialog
-        onClose={() => setIsManualDialogOpen(false)}
+        onClose={() => {
+          setIsManualDialogOpen(false);
+          setManualAttributionState(null);
+          setManualWorkMinutes("50");
+          setManualWorkNote("");
+        }}
         open={isManualDialogOpen}
         title="Add missed work"
       >
-        <div className="space-y-4">
-          <ActionField
-            label="Minutes"
-            inputMode="numeric"
-            min="1"
-            onChange={(event) => setManualWorkMinutes(event.target.value)}
-            type="number"
-            value={manualWorkMinutes}
-          />
-          <ActionField
-            label="Note"
-            onChange={(event) => setManualWorkNote(event.target.value)}
-            placeholder="Optional note"
-            value={manualWorkNote}
-          />
-          <Button className="w-full" onClick={handleManualWorkAdd} variant="secondary">
-            Add work block
-          </Button>
-        </div>
+        {manualAttributionState ? (
+          <div className="space-y-5">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ActionField
+                label="Minutes"
+                inputMode="numeric"
+                min="1"
+                onChange={(event) => setManualWorkMinutes(event.target.value)}
+                type="number"
+                value={manualWorkMinutes}
+              />
+              <ActionField
+                label="Note"
+                onChange={(event) => setManualWorkNote(event.target.value)}
+                placeholder="Optional note"
+                value={manualWorkNote}
+              />
+            </div>
+
+            <AttributionFields
+              choresTask={manualAttributionState.choresTask}
+              dailyFocusItems={dailyFocusItems}
+              durationMinutes={Number.parseInt(manualWorkMinutes, 10) || 0}
+              emptyStateMessage="No today-list tasks are available, so chores or other are the current attribution options."
+              onOtherSelectedChange={(checked) =>
+                setManualAttributionState((current) =>
+                  current ? { ...current, otherSelected: checked } : current
+                )}
+              onOtherTitleChange={(value) =>
+                setManualAttributionState((current) =>
+                  current ? { ...current, otherTitle: value } : current
+                )}
+              onToggleTask={toggleManualAttributionTask}
+              otherSelected={manualAttributionState.otherSelected}
+              otherTitle={manualAttributionState.otherTitle}
+              selectedTaskIds={manualAttributionState.selectedTaskIds}
+            />
+
+            <Button className="w-full" onClick={handleManualWorkAdd} variant="secondary">
+              Save work block
+            </Button>
+          </div>
+        ) : null}
       </Dialog>
 
       <Dialog
@@ -808,6 +1438,48 @@ export default function HomePage() {
             Spend reward
           </Button>
         </div>
+      </Dialog>
+
+      <Dialog
+        onClose={() =>
+          setPersistenceState({
+            kind: "error",
+            message: "Attribute the completed work block before dismissing this dialog.",
+          })}
+        open={Boolean(attributionDialogState)}
+        title="Attribute work block"
+      >
+        {attributionDialogState ? (
+          <div className="space-y-5">
+            <p className="text-sm leading-6 text-slate-600">
+              Split this completed work block across the tasks it supported.
+            </p>
+            <AttributionFields
+              choresTask={attributionDialogState.choresTask}
+              dailyFocusItems={dailyFocusItems}
+              durationMinutes={attributionDialogState.workBlock.duration_minutes}
+              emptyStateMessage="No today-list tasks are available, so chores or other are the current attribution options."
+              onOtherSelectedChange={(checked) =>
+                setAttributionDialogState((current) =>
+                  current ? { ...current, otherSelected: checked } : current
+                )}
+              onOtherTitleChange={(value) =>
+                setAttributionDialogState((current) =>
+                  current ? { ...current, otherTitle: value } : current
+                )}
+              onToggleTask={toggleAttributionTask}
+              otherSelected={attributionDialogState.otherSelected}
+              otherTitle={attributionDialogState.otherTitle}
+              selectedTaskIds={attributionDialogState.selectedTaskIds}
+            />
+
+            <div className="flex justify-end">
+              <Button onClick={handleSaveWorkAttribution} variant="secondary">
+                Save attribution
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Dialog>
     </main>
   );
