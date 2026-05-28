@@ -68,7 +68,7 @@ Before the first production deploy:
 1. In Vercel Project Settings, add:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-2. In Supabase, enable Anonymous sign-ins under Authentication providers.
+2. In Supabase, enable Email auth and magic-link sign-in under Authentication providers.
 3. Apply the SQL migrations in `supabase/migrations/` to the target Supabase project.
 
 Recommended verification after deploy:
@@ -79,7 +79,7 @@ Recommended verification after deploy:
 4. Spend a reward and verify a `reward_rules`, `reward_redemptions`, and `ledger_events` row are written.
 
 If the site loads but persistence fails, check these first:
-- Anonymous auth is enabled in Supabase.
+- Email auth and magic-link sign-in are enabled in Supabase.
 - Both public env vars are present in Vercel for the correct environment.
 - The schema and RLS policies from `supabase/migrations/` were applied to the same Supabase project referenced by the Vercel env vars.
 

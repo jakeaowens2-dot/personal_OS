@@ -42,9 +42,16 @@ const INITIAL_STATE: LocalLedgerState = {
 
 type PersistenceState =
   | { kind: "connecting"; message: string }
+  | { kind: "auth_required"; message: string }
   | { kind: "ready"; message: string }
   | { kind: "saving"; message: string }
   | { kind: "saved"; message: string }
+  | { kind: "error"; message: string };
+
+type AuthRequestState =
+  | { kind: "idle"; message: string | null }
+  | { kind: "sending"; message: string }
+  | { kind: "sent"; message: string }
   | { kind: "error"; message: string };
 
 function isToday(isoTimestamp: string) {
@@ -174,6 +181,46 @@ function ActionField({ label, className, ...props }: ActionFieldProps) {
   );
 }
 
+function AuthCard({
+  email,
+  emailState,
+  onEmailChange,
+  onSubmit,
+}: {
+  email: string;
+  emailState: AuthRequestState;
+  onEmailChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <section className="mx-auto w-full max-w-xl rounded-[0.9rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)] sm:p-8">
+      <div className="space-y-3">
+        <p className="text-xs uppercase tracking-[0.22em] text-slate-500">Persistent workspace</p>
+        <h2 className="text-2xl font-semibold tracking-tight text-slate-950">Sign in with a magic link</h2>
+        <p className="text-sm leading-6 text-slate-600">
+          Your work history is tied to your user account. Sign in once and this workspace will stay attached to the
+          same identity instead of creating a new anonymous one on each deployment URL.
+        </p>
+      </div>
+
+      <div className="mt-6 space-y-4">
+        <ActionField
+          autoComplete="email"
+          label="Email"
+          onChange={(event) => onEmailChange(event.target.value)}
+          placeholder="you@example.com"
+          type="email"
+          value={email}
+        />
+        <Button className="w-full" onClick={onSubmit} variant="secondary">
+          {emailState.kind === "sending" ? "Sending magic link..." : "Email me a sign-in link"}
+        </Button>
+        {emailState.message ? <p className="text-sm text-slate-600">{emailState.message}</p> : null}
+      </div>
+    </section>
+  );
+}
+
 type BlockMeterProps = {
   color: "reward" | "reward_negative" | "work";
   count: number;
@@ -244,6 +291,10 @@ export default function HomePage() {
     kind: "connecting",
     message: "Connecting workspace...",
   });
+  const [authRequestState, setAuthRequestState] = useState<AuthRequestState>({
+    kind: "idle",
+    message: null,
+  });
   const [timerVisualState, setTimerVisualState] = useState<{
     mode: TimerMode;
     status: TimerStatus;
@@ -252,6 +303,8 @@ export default function HomePage() {
     status: "idle",
   });
   const [workspaceUserId, setWorkspaceUserId] = useState<string | null>(null);
+  const [workspaceUserEmail, setWorkspaceUserEmail] = useState<string | null>(null);
+  const [signInEmail, setSignInEmail] = useState("");
   const [manualWorkMinutes, setManualWorkMinutes] = useState("50");
   const [manualWorkNote, setManualWorkNote] = useState("");
   const [isManualDialogOpen, setIsManualDialogOpen] = useState(false);
@@ -359,6 +412,11 @@ export default function HomePage() {
         }
 
         setWorkspaceUserId(user.id);
+        setWorkspaceUserEmail(user.email ?? null);
+        setAuthRequestState({
+          kind: "idle",
+          message: null,
+        });
 
         const workspaceData = await fetchWorkspaceData(supabase, user.id);
 
@@ -376,9 +434,16 @@ export default function HomePage() {
           return;
         }
 
+        const message = error instanceof Error ? error.message : "Could not connect the workspace.";
+        const authRequired = message.toLowerCase().includes("sign in with your email");
+
+        setWorkspaceUserId(null);
+        setWorkspaceUserEmail(null);
+        setLocalLedgerState(INITIAL_STATE);
+
         setPersistenceState({
-          kind: "error",
-          message: error instanceof Error ? error.message : "Could not connect the workspace.",
+          kind: authRequired ? "auth_required" : "error",
+          message,
         });
       }
     }
@@ -389,6 +454,125 @@ export default function HomePage() {
       cancelled = true;
     };
   }, [supabase]);
+
+  useEffect(() => {
+    if (!supabase) {
+      return;
+    }
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user ?? null;
+
+      if (!user) {
+        handledCompletionKeysRef.current.clear();
+        setWorkspaceUserId(null);
+        setWorkspaceUserEmail(null);
+        setLocalLedgerState(INITIAL_STATE);
+        setPersistenceState({
+          kind: "auth_required",
+          message: "Sign in with your email to load your workspace.",
+        });
+        return;
+      }
+
+      setWorkspaceUserId(user.id);
+      setWorkspaceUserEmail(user.email ?? null);
+      setPersistenceState({
+        kind: "connecting",
+        message: "Loading your workspace...",
+      });
+      setAuthRequestState({
+        kind: "idle",
+        message: null,
+      });
+
+      void fetchWorkspaceData(supabase, user.id)
+        .then((workspaceData) => {
+          setLocalLedgerState(workspaceData);
+          setPersistenceState({
+            kind: "ready",
+            message: "Workspace connected",
+          });
+        })
+        .catch((error) => {
+          setPersistenceState({
+            kind: "error",
+            message: error instanceof Error ? error.message : "Could not load the workspace.",
+          });
+        });
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  const handleMagicLinkSignIn = async () => {
+    if (!supabase) {
+      setAuthRequestState({
+        kind: "error",
+        message: "Supabase env vars are missing for this deployment.",
+      });
+      return;
+    }
+
+    const trimmedEmail = signInEmail.trim();
+
+    if (!trimmedEmail) {
+      setAuthRequestState({
+        kind: "error",
+        message: "Enter your email address to receive a sign-in link.",
+      });
+      return;
+    }
+
+    setAuthRequestState({
+      kind: "sending",
+      message: "Sending magic link...",
+    });
+
+    const { error } = await supabase.auth.signInWithOtp({
+      email: trimmedEmail,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+
+    if (error) {
+      setAuthRequestState({
+        kind: "error",
+        message: error.message || "Could not send the sign-in link.",
+      });
+      return;
+    }
+
+    setAuthRequestState({
+      kind: "sent",
+      message: `Check ${trimmedEmail} for your sign-in link.`,
+    });
+  };
+
+  const handleSignOut = async () => {
+    if (!supabase) {
+      return;
+    }
+
+    setPersistenceState({
+      kind: "connecting",
+      message: "Signing out...",
+    });
+
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error.message || "Could not sign out.",
+      });
+    }
+  };
 
   const handleTimerComplete = async ({
     completedAt,
@@ -586,126 +770,147 @@ export default function HomePage() {
               One quiet workspace for focus, recovery, and a visible work loop.
             </p>
           </div>
-          <Badge className="normal-case tracking-normal" tone="neutral">
-            {persistenceState.message}
-          </Badge>
+          <div className="flex flex-col items-start gap-3 sm:items-end">
+            {workspaceUserId ? (
+              <div className="flex items-center gap-3">
+                {workspaceUserEmail ? <p className="text-sm text-slate-500">{workspaceUserEmail}</p> : null}
+                <Button onClick={handleSignOut} size="inline" variant="text">
+                  Sign out
+                </Button>
+              </div>
+            ) : null}
+            <Badge className="normal-case tracking-normal" tone="neutral">
+              {persistenceState.message}
+            </Badge>
+          </div>
         </header>
 
         {persistenceState.kind === "error" ? (
           <p className="text-sm text-rose-700">{persistenceState.message}</p>
         ) : null}
 
-        <PomodoroTimer
-          onComplete={handleTimerComplete}
-          onStateChange={setTimerVisualState}
-        />
+        {workspaceUserId ? (
+          <>
+            <PomodoroTimer
+              onComplete={handleTimerComplete}
+              onStateChange={setTimerVisualState}
+            />
 
-        <section className="grid gap-6 pt-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_22rem] lg:items-start">
-          <section className="lg:col-span-2 rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
-            <div className="grid gap-8 md:grid-cols-2 md:gap-0">
-              <OverviewModule
-                action={
-                  <Button onClick={() => setIsManualDialogOpen(true)} size="inline" variant="text">
-                    Add manually
-                  </Button>
-                }
-                body={
-                  <BlockMeter
-                    color="work"
-                    count={todaysWorkBlocks.length}
-                    label=""
-                    valueLabel=""
-                    zeroLabel="No completed blocks yet"
+            <section className="grid gap-6 pt-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_22rem] lg:items-start">
+              <section className="lg:col-span-2 rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
+                <div className="grid gap-8 md:grid-cols-2 md:gap-0">
+                  <OverviewModule
+                    action={
+                      <Button onClick={() => setIsManualDialogOpen(true)} size="inline" variant="text">
+                        Add manually
+                      </Button>
+                    }
+                    body={
+                      <BlockMeter
+                        color="work"
+                        count={todaysWorkBlocks.length}
+                        label=""
+                        valueLabel=""
+                        zeroLabel="No completed blocks yet"
+                      />
+                    }
+                    className="md:pr-8"
+                    footer={
+                      <p className="text-sm font-medium text-slate-500">
+                        {todaysWorkBlocks.length} block{todaysWorkBlocks.length === 1 ? "" : "s"}
+                      </p>
+                    }
+                    ruleStyle={{ backgroundColor: timerPalette.work.progress }}
+                    title="Today&apos;s work"
                   />
-                }
-                className="md:pr-8"
-                footer={
-                  <p className="text-sm font-medium text-slate-500">
-                    {todaysWorkBlocks.length} block{todaysWorkBlocks.length === 1 ? "" : "s"}
-                  </p>
-                }
-                ruleStyle={{ backgroundColor: timerPalette.work.progress }}
-                title="Today&apos;s work"
-              />
 
-              <OverviewModule
-                action={
-                  <Button onClick={() => setIsRewardDialogOpen(true)} size="inline" variant="text">
-                    Spend reward
-                  </Button>
-                }
-                badge={
-                  isWeekendBonusActive ? (
-                    <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
-                      {WEEKEND_REWARD_MULTIPLIER_LABEL}
-                    </span>
-                  ) : undefined
-                }
-                body={
-                  <BlockMeter
-                    color={currentRewardMinutes < 0 ? "reward_negative" : "reward"}
-                    count={Math.ceil(currentRewardBalance)}
-                    label=""
-                    partialCount={currentRewardBalance}
-                    valueLabel=""
-                    zeroLabel="No reward time yet"
+                  <OverviewModule
+                    action={
+                      <Button onClick={() => setIsRewardDialogOpen(true)} size="inline" variant="text">
+                        Spend reward
+                      </Button>
+                    }
+                    badge={
+                      isWeekendBonusActive ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">
+                          {WEEKEND_REWARD_MULTIPLIER_LABEL}
+                        </span>
+                      ) : undefined
+                    }
+                    body={
+                      <BlockMeter
+                        color={currentRewardMinutes < 0 ? "reward_negative" : "reward"}
+                        count={Math.ceil(currentRewardBalance)}
+                        label=""
+                        partialCount={currentRewardBalance}
+                        valueLabel=""
+                        zeroLabel="No reward time yet"
+                      />
+                    }
+                    className="md:border-l md:border-slate-300/80 md:pl-8"
+                    footer={
+                      <p className="text-sm font-medium text-slate-500">
+                        {currentRewardMinutes < 0
+                          ? `${formatRewardMinutes(currentRewardMinutes)} behind`
+                          : `${formatRewardMinutes(currentRewardMinutes)} available`}
+                      </p>
+                    }
+                    ruleStyle={{ backgroundColor: rewardPalette.progress }}
+                    title="Reward balance"
                   />
-                }
-                className="md:border-l md:border-slate-300/80 md:pl-8"
-                footer={
-                  <p className="text-sm font-medium text-slate-500">
-                    {currentRewardMinutes < 0
-                      ? `${formatRewardMinutes(currentRewardMinutes)} behind`
-                      : `${formatRewardMinutes(currentRewardMinutes)} available`}
-                  </p>
-                }
-                ruleStyle={{ backgroundColor: rewardPalette.progress }}
-                title="Reward balance"
-              />
-            </div>
-          </section>
-
-          <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
-            <OverviewModule
-              body={
-                <BlockMeter
-                  color="work"
-                  count={weeklyWorkBlocks.length}
-                  label=""
-                  valueLabel=""
-                  zeroLabel="No work blocks this week"
-                />
-              }
-              footer={
-                <div className="grid gap-4 border-t border-slate-200/80 pt-4">
-                  <div className="space-y-1">
-                    <p className="text-sm text-slate-500">Reward earned</p>
-                    <p className="text-sm font-medium text-slate-900">{formatRewardMinutes(weeklyRewardMinutesEarned)}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm text-slate-500">Work balance</p>
-                    <p className="text-sm font-medium text-slate-900">
-                      {currentWorkBalance} work block{Math.abs(currentWorkBalance) === 1 ? "" : "s"}
-                    </p>
-                  </div>
                 </div>
-              }
-              title="Weekly overview"
-            />
-          </section>
+              </section>
 
-          <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)] lg:col-start-3">
-            <OverviewModule
-              body={
-                <LedgerEventList
-                  emptyMessage="Finish a work timer to create your first saved ledger event."
-                  events={recentLedgerEvents}
+              <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
+                <OverviewModule
+                  body={
+                    <BlockMeter
+                      color="work"
+                      count={weeklyWorkBlocks.length}
+                      label=""
+                      valueLabel=""
+                      zeroLabel="No work blocks this week"
+                    />
+                  }
+                  footer={
+                    <div className="grid gap-4 border-t border-slate-200/80 pt-4">
+                      <div className="space-y-1">
+                        <p className="text-sm text-slate-500">Reward earned</p>
+                        <p className="text-sm font-medium text-slate-900">{formatRewardMinutes(weeklyRewardMinutesEarned)}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm text-slate-500">Work balance</p>
+                        <p className="text-sm font-medium text-slate-900">
+                          {currentWorkBalance} work block{Math.abs(currentWorkBalance) === 1 ? "" : "s"}
+                        </p>
+                      </div>
+                    </div>
+                  }
+                  title="Weekly overview"
                 />
-              }
-              title="Recent activity"
-            />
-          </section>
-        </section>
+              </section>
+
+              <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)] lg:col-start-3">
+                <OverviewModule
+                  body={
+                    <LedgerEventList
+                      emptyMessage="Finish a work timer to create your first saved ledger event."
+                      events={recentLedgerEvents}
+                    />
+                  }
+                  title="Recent activity"
+                />
+              </section>
+            </section>
+          </>
+        ) : (
+          <AuthCard
+            email={signInEmail}
+            emailState={authRequestState}
+            onEmailChange={setSignInEmail}
+            onSubmit={handleMagicLinkSignIn}
+          />
+        )}
       </div>
 
       <Dialog
