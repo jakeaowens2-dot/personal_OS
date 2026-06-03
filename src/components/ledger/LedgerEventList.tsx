@@ -6,6 +6,10 @@ type LedgerEventListProps = {
   emptyMessage: string;
   events: LedgerEvent[];
   maxItems?: number;
+  onRequestDelete?: (event: LedgerEvent) => void;
+  onRequestEdit?: (event: LedgerEvent) => void;
+  showDeleteAction?: (event: LedgerEvent) => boolean;
+  showEditAction?: (event: LedgerEvent) => boolean;
 };
 
 function formatTimestamp(isoTimestamp: string) {
@@ -91,6 +95,10 @@ export function LedgerEventList({
   emptyMessage,
   events,
   maxItems,
+  onRequestDelete,
+  onRequestEdit,
+  showDeleteAction,
+  showEditAction,
 }: LedgerEventListProps) {
   const visibleEvents = typeof maxItems === "number" ? events.slice(0, maxItems) : events;
 
@@ -117,11 +125,40 @@ export function LedgerEventList({
               <p className="mt-1 text-sm text-slate-600">{getEventDetail(event)}</p>
             </div>
           </div>
-          <span
-            aria-hidden="true"
-            className="mt-1 h-3.5 w-3.5 rounded-[4px]"
-            style={{ backgroundColor: getDeltaSwatchColor(event) }}
-          />
+          <div className="flex items-start gap-3">
+            <span
+              aria-hidden="true"
+              className="mt-1 h-3.5 w-3.5 rounded-[4px]"
+              style={{ backgroundColor: getDeltaSwatchColor(event) }}
+            />
+            {onRequestEdit || onRequestDelete ? (
+              <details className="relative">
+                <summary className="cursor-pointer list-none rounded-[0.6rem] px-2 py-1 text-sm text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
+                  ...
+                </summary>
+                <div className="absolute right-0 top-8 z-20 min-w-32 rounded-[0.8rem] border border-slate-200/90 bg-white/95 p-2 shadow-[0_16px_28px_rgba(15,23,42,0.1)]">
+                  {onRequestEdit && (showEditAction ? showEditAction(event) : true) ? (
+                    <button
+                      className="block w-full rounded-[0.6rem] px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/90 hover:text-slate-950"
+                      onClick={() => onRequestEdit(event)}
+                      type="button"
+                    >
+                      Edit
+                    </button>
+                  ) : null}
+                  {onRequestDelete && (showDeleteAction ? showDeleteAction(event) : true) ? (
+                    <button
+                      className="block w-full rounded-[0.6rem] px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/90 hover:text-slate-950"
+                      onClick={() => onRequestDelete(event)}
+                      type="button"
+                    >
+                      Delete
+                    </button>
+                  ) : null}
+                </div>
+              </details>
+            ) : null}
+          </div>
         </article>
       ))}
     </div>

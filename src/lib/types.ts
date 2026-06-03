@@ -10,6 +10,9 @@ export type TimerSession = {
   completed: boolean;
   interrupted: boolean;
   notes: string | null;
+  deleted_at?: string | null;
+  deleted_by_actor_label?: string | null;
+  deletion_reason?: string | null;
 };
 
 export type WorkBlock = {
@@ -20,6 +23,9 @@ export type WorkBlock = {
   duration_minutes: number;
   tag: string | null;
   quality_rating: number | null;
+  deleted_at?: string | null;
+  deleted_by_actor_label?: string | null;
+  deletion_reason?: string | null;
 };
 
 export type LedgerEventType = "work_earned" | "reward_spent" | "correction" | "bonus";
@@ -33,6 +39,9 @@ export type LedgerEvent = {
   source: string;
   metadata: Record<string, unknown> | null;
   created_at: string;
+  deleted_at?: string | null;
+  deleted_by_actor_label?: string | null;
+  deletion_reason?: string | null;
 };
 
 export type RewardRule = {
@@ -43,6 +52,9 @@ export type RewardRule = {
   reward_minutes: number;
   active: boolean;
   created_at?: string;
+  deleted_at?: string | null;
+  deleted_by_actor_label?: string | null;
+  deletion_reason?: string | null;
 };
 
 export type RewardRedemption = {
@@ -53,6 +65,9 @@ export type RewardRedemption = {
   cost_work_blocks: number;
   redeemed_at: string;
   notes: string | null;
+  deleted_at?: string | null;
+  deleted_by_actor_label?: string | null;
+  deletion_reason?: string | null;
 };
 
 export type TaskStatus = "open" | "in_progress" | "blocked" | "completed" | "archived";
@@ -152,4 +167,7 @@ export type WorkBlockAttribution = {
   share_ratio: number;
   attributed_minutes: number;
   created_at: string;
+  deleted_at?: string | null;
+  deleted_by_actor_label?: string | null;
+  deletion_reason?: string | null;
 };

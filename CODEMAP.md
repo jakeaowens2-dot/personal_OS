@@ -68,6 +68,7 @@ supabase/
     20260528001500_add_tasks_and_revisions.sql
     20260528011500_add_daily_focus.sql
     20260528023000_add_work_block_attributions.sql
+    20260528103000_add_ledger_event_correction_fields.sql
 ```
 
 ## Planned Structure
@@ -150,6 +151,7 @@ Current files:
 - `src/lib/ledger.ts`
 - `src/lib/workspace.ts` handles Supabase-backed workspace session bootstrap, loading, and completion persistence.
 - `src/lib/workspace.ts` also persists post-completion work-block attribution and updates ledger metadata with readable task summaries.
+- `src/components/ledger/LedgerEventList.tsx` now exposes recent-activity edit/delete actions for supported ledger events.
 
 Planned files:
 - `src/lib/ledger.ts`
@@ -205,6 +207,7 @@ Current files:
 - `supabase/migrations/20260528001500_add_tasks_and_revisions.sql` adds canonical tasks plus durable task revision history.
 - `supabase/migrations/20260528011500_add_daily_focus.sql` adds the lightweight daily focus list that references canonical tasks.
 - `supabase/migrations/20260528023000_add_work_block_attributions.sql` adds durable per-task work-block attribution for post-completion task assignment.
+- `supabase/migrations/20260528103000_add_ledger_event_correction_fields.sql` adds soft-delete audit fields for ledger-linked records and update access for attribution corrections.
 
 Planned files:
 - `supabase/migrations/*`

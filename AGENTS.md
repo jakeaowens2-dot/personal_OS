@@ -35,6 +35,19 @@ Use:
 
 Do not introduce a different framework, UI library, database, ORM, state manager, or background-job system unless a task explicitly asks for it.
 
+## Maintaining modern configurations
+This is a modern Next.js app intended for Vercel deployment.
+
+Deployment rules:
+- Use the current Vercel Next.js framework preset.
+- Build command should be npm run build.
+- The build script should be next build.
+- Do not use now-build, @now/next, next build --lambdas, or legacy Zeit/Now builders.
+- Do not add a pages directory just to satisfy legacy tooling.
+- Prefer App Router conventions unless the codebase explicitly uses Pages Router.
+- Before changing dependency versions, explain why the change is needed.
+- After dependency changes, run npm install and npm run build.
+
 ## Operating Rules for Token Economy
 
 Agents must minimize unnecessary context loading.

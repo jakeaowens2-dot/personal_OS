@@ -38,15 +38,44 @@ type PersistRewardSpendInput = {
   userId: string;
 };
 
+type WorkBlockAttributionSelection = {
+  label: string;
+  taskId: string;
+};
+
 type PersistWorkBlockAttributionsInput = {
   durationMinutes: number;
   ledgerEvent: LedgerEvent;
-  selections: Array<{
-    label: string;
-    taskId: string;
-  }>;
+  note?: string;
+  selections: WorkBlockAttributionSelection[];
   userId: string;
   workBlockId: string;
+};
+
+type SoftDeleteInput = {
+  actorLabel: string;
+  deletionReason: string;
+  ledgerEvent: LedgerEvent;
+  userId: string;
+};
+
+type UpdateManualWorkEntryInput = {
+  actorLabel: string;
+  durationMinutes: number;
+  ledgerEvent: LedgerEvent;
+  note?: string;
+  selections: WorkBlockAttributionSelection[];
+  userId: string;
+};
+
+type UpdateRewardSpendEntryInput = {
+  costWorkBlocks: number;
+  ledgerEvent: LedgerEvent;
+  notes?: string;
+  redeemedAt: string;
+  rewardMinutes: number;
+  rewardName: string;
+  userId: string;
 };
 
 export const AUTH_REQUIRED_MESSAGE = "Sign in with your email to load your workspace.";
@@ -114,16 +143,19 @@ export async function fetchWorkspaceData(supabase: SupabaseClient, userId: strin
       .from("timer_sessions")
       .select("id, user_id, mode, planned_minutes, started_at, ended_at, completed, interrupted, notes")
       .eq("user_id", userId)
+      .is("deleted_at", null)
       .order("started_at", { ascending: false }),
     supabase
       .from("work_blocks")
       .select("id, user_id, timer_session_id, earned_at, duration_minutes, tag, quality_rating")
       .eq("user_id", userId)
+      .is("deleted_at", null)
       .order("earned_at", { ascending: false }),
     supabase
       .from("ledger_events")
       .select("id, user_id, event_type, delta_work_blocks, delta_reward_blocks, source, metadata, created_at")
       .eq("user_id", userId)
+      .is("deleted_at", null)
       .order("created_at", { ascending: false }),
   ]);
 
@@ -355,9 +387,84 @@ function buildAttributionSummary(labels: string[]) {
   return `${labels[0]} + ${labels.length - 1} more`;
 }
 
+function buildDeletedFields(actorLabel: string, deletionReason: string) {
+  return {
+    deleted_at: new Date().toISOString(),
+    deleted_by_actor_label: actorLabel,
+    deletion_reason: deletionReason.trim(),
+  };
+}
+
+function buildManualWorkLedgerMetadata({
+  durationMinutes,
+  ledgerEvent,
+  note,
+  selections,
+}: {
+  durationMinutes: number;
+  ledgerEvent: LedgerEvent;
+  note?: string;
+  selections: WorkBlockAttributionSelection[];
+}) {
+  const attributionLabels = selections.map((selection) => selection.label);
+  const attributionSummary = buildAttributionSummary(attributionLabels);
+
+  return {
+    ...(ledgerEvent.metadata ?? {}),
+    attribution_count: selections.length,
+    attribution_labels: attributionLabels,
+    attribution_summary: attributionSummary,
+    attributed_minutes: durationMinutes,
+    attributed_task_ids: selections.map((selection) => selection.taskId),
+    duration_minutes: durationMinutes,
+    note: note?.trim() || null,
+  };
+}
+
+function getMetadataString(metadata: Record<string, unknown> | null | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" ? value : null;
+}
+
+function getMetadataNumber(metadata: Record<string, unknown> | null | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "number" ? value : null;
+}
+
+async function softDeleteAttributionsForWorkBlock(
+  supabase: SupabaseClient,
+  {
+    actorLabel,
+    deletionReason,
+    userId,
+    workBlockId,
+  }: {
+    actorLabel: string;
+    deletionReason: string;
+    userId: string;
+    workBlockId: string;
+  },
+) {
+  const { error } = await supabase
+    .from("work_block_attributions")
+    .update(buildDeletedFields(actorLabel, deletionReason))
+    .eq("user_id", userId)
+    .eq("work_block_id", workBlockId)
+    .is("deleted_at", null);
+
+  if (error) {
+    throw new Error(
+      enhanceWorkspaceError(
+        toErrorMessage(error, "Could not update work block attributions."),
+        "work attribution",
+      ),
+    );
+  }
+}
+
 export async function persistWorkBlockAttributions(
   supabase: SupabaseClient,
-  { durationMinutes, ledgerEvent, selections, userId, workBlockId }: PersistWorkBlockAttributionsInput,
+  { durationMinutes, ledgerEvent, note, selections, userId, workBlockId }: PersistWorkBlockAttributionsInput,
 ) {
   const shareCount = selections.length;
 
@@ -392,16 +499,12 @@ export async function persistWorkBlockAttributions(
     );
   }
 
-  const attributionLabels = selections.map((selection) => selection.label);
-  const attributionSummary = buildAttributionSummary(attributionLabels);
-  const updatedLedgerMetadata = {
-    ...(ledgerEvent.metadata ?? {}),
-    attribution_count: selections.length,
-    attribution_labels: attributionLabels,
-    attribution_summary: attributionSummary,
-    attributed_minutes: durationMinutes,
-    attributed_task_ids: selections.map((selection) => selection.taskId),
-  };
+  const updatedLedgerMetadata = buildManualWorkLedgerMetadata({
+    durationMinutes,
+    ledgerEvent,
+    note,
+    selections,
+  });
 
   const { error: ledgerEventError } = await supabase
     .from("ledger_events")
@@ -426,5 +529,328 @@ export async function persistWorkBlockAttributions(
       ...ledgerEvent,
       metadata: updatedLedgerMetadata,
     },
+  };
+}
+
+export async function fetchAttributionSelectionsForWorkBlock(
+  supabase: SupabaseClient,
+  { userId, workBlockId }: { userId: string; workBlockId: string },
+) {
+  const { data, error } = await supabase
+    .from("work_block_attributions")
+    .select("task_id, attribution_label")
+    .eq("user_id", userId)
+    .eq("work_block_id", workBlockId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(
+      enhanceWorkspaceError(
+        toErrorMessage(error, "Could not load work block attributions."),
+        "work attribution",
+      ),
+    );
+  }
+
+  return (data ?? []).map((row) => ({
+    label: row.attribution_label as string,
+    taskId: row.task_id as string,
+  }));
+}
+
+export async function updateManualWorkEntry(
+  supabase: SupabaseClient,
+  { actorLabel, durationMinutes, ledgerEvent, note, selections, userId }: UpdateManualWorkEntryInput,
+) {
+  const timerSessionId = getMetadataString(ledgerEvent.metadata, "timer_session_id");
+  const workBlockId = getMetadataString(ledgerEvent.metadata, "work_block_id");
+
+  if (!timerSessionId || !workBlockId) {
+    throw new Error("This work event is missing its linked session records and cannot be edited safely.");
+  }
+
+  const endedAt = ledgerEvent.created_at;
+  const startedAt = new Date(new Date(endedAt).getTime() - durationMinutes * 60 * 1000).toISOString();
+
+  const { error: timerSessionError } = await supabase
+    .from("timer_sessions")
+    .update({
+      planned_minutes: durationMinutes,
+      started_at: startedAt,
+      ended_at: endedAt,
+      notes: note?.trim() || "Manual work block entry",
+    })
+    .eq("id", timerSessionId)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (timerSessionError) {
+    throw new Error(toErrorMessage(timerSessionError, "Could not update the manual timer session."));
+  }
+
+  const { error: workBlockError } = await supabase
+    .from("work_blocks")
+    .update({
+      duration_minutes: durationMinutes,
+      earned_at: endedAt,
+      tag: "manual",
+    })
+    .eq("id", workBlockId)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (workBlockError) {
+    throw new Error(toErrorMessage(workBlockError, "Could not update the manual work block."));
+  }
+
+  await softDeleteAttributionsForWorkBlock(supabase, {
+    actorLabel,
+    deletionReason: "Superseded by a later edit.",
+    userId,
+    workBlockId,
+  });
+
+  const updatedLedgerMetadata = buildManualWorkLedgerMetadata({
+    durationMinutes,
+    ledgerEvent,
+    note,
+    selections,
+  });
+
+  const { error: ledgerEventError } = await supabase
+    .from("ledger_events")
+    .update({
+      metadata: updatedLedgerMetadata,
+    })
+    .eq("id", ledgerEvent.id)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (ledgerEventError) {
+    throw new Error(toErrorMessage(ledgerEventError, "Could not update the ledger event."));
+  }
+
+  const attributionResult = await persistWorkBlockAttributions(supabase, {
+    durationMinutes,
+    ledgerEvent: {
+      ...ledgerEvent,
+      metadata: updatedLedgerMetadata,
+    },
+    selections,
+    userId,
+    workBlockId,
+  });
+
+  return {
+    ledgerEvent: attributionResult.ledgerEvent,
+  };
+}
+
+export async function softDeleteWorkEvent(
+  supabase: SupabaseClient,
+  { actorLabel, deletionReason, ledgerEvent, userId }: SoftDeleteInput,
+) {
+  const workBlockId = getMetadataString(ledgerEvent.metadata, "work_block_id");
+  const timerSessionId = getMetadataString(ledgerEvent.metadata, "timer_session_id");
+  const deletedFields = buildDeletedFields(actorLabel, deletionReason);
+
+  if (workBlockId) {
+    await softDeleteAttributionsForWorkBlock(supabase, {
+      actorLabel,
+      deletionReason,
+      userId,
+      workBlockId,
+    });
+
+    const { error: workBlockError } = await supabase
+      .from("work_blocks")
+      .update(deletedFields)
+      .eq("id", workBlockId)
+      .eq("user_id", userId)
+      .is("deleted_at", null);
+
+    if (workBlockError) {
+      throw new Error(toErrorMessage(workBlockError, "Could not delete the work block."));
+    }
+  }
+
+  if (timerSessionId) {
+    const { error: timerSessionError } = await supabase
+      .from("timer_sessions")
+      .update(deletedFields)
+      .eq("id", timerSessionId)
+      .eq("user_id", userId)
+      .is("deleted_at", null);
+
+    if (timerSessionError) {
+      throw new Error(toErrorMessage(timerSessionError, "Could not delete the timer session."));
+    }
+  }
+
+  const { error: ledgerEventError } = await supabase
+    .from("ledger_events")
+    .update(deletedFields)
+    .eq("id", ledgerEvent.id)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (ledgerEventError) {
+    throw new Error(toErrorMessage(ledgerEventError, "Could not delete the ledger event."));
+  }
+}
+
+export async function updateRewardSpendEntry(
+  supabase: SupabaseClient,
+  { costWorkBlocks, ledgerEvent, notes, redeemedAt, rewardMinutes, rewardName, userId }: UpdateRewardSpendEntryInput,
+) {
+  const rewardRedemptionId = getMetadataString(ledgerEvent.metadata, "reward_redemption_id");
+  const rewardRuleId = getMetadataString(ledgerEvent.metadata, "reward_rule_id");
+
+  if (!rewardRedemptionId || !rewardRuleId) {
+    throw new Error("This reward event is missing its linked reward records and cannot be edited safely.");
+  }
+
+  const trimmedRewardName = rewardName.trim();
+  const trimmedNotes = notes?.trim() || null;
+
+  const { error: rewardRuleError } = await supabase
+    .from("reward_rules")
+    .update({
+      name: trimmedRewardName,
+      cost_work_blocks: costWorkBlocks,
+      reward_minutes: rewardMinutes,
+    })
+    .eq("id", rewardRuleId)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (rewardRuleError) {
+    throw new Error(toErrorMessage(rewardRuleError, "Could not update the reward rule."));
+  }
+
+  const { error: rewardRedemptionError } = await supabase
+    .from("reward_redemptions")
+    .update({
+      reward_name: trimmedRewardName,
+      cost_work_blocks: costWorkBlocks,
+      redeemed_at: redeemedAt,
+      notes: trimmedNotes,
+    })
+    .eq("id", rewardRedemptionId)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (rewardRedemptionError) {
+    throw new Error(toErrorMessage(rewardRedemptionError, "Could not update the reward redemption."));
+  }
+
+  const updatedMetadata = {
+    ...(ledgerEvent.metadata ?? {}),
+    reward_redemption_id: rewardRedemptionId,
+    reward_rule_id: rewardRuleId,
+    reward_name: trimmedRewardName,
+    reward_minutes: rewardMinutes,
+    notes: trimmedNotes,
+  };
+
+  const { error: ledgerEventError } = await supabase
+    .from("ledger_events")
+    .update({
+      created_at: redeemedAt,
+      delta_work_blocks: -costWorkBlocks,
+      metadata: updatedMetadata,
+    })
+    .eq("id", ledgerEvent.id)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (ledgerEventError) {
+    throw new Error(toErrorMessage(ledgerEventError, "Could not update the reward ledger event."));
+  }
+
+  return {
+    ledgerEvent: {
+      ...ledgerEvent,
+      created_at: redeemedAt,
+      delta_work_blocks: -costWorkBlocks,
+      metadata: updatedMetadata,
+    },
+  };
+}
+
+export async function softDeleteRewardSpendEvent(
+  supabase: SupabaseClient,
+  { actorLabel, deletionReason, ledgerEvent, userId }: SoftDeleteInput,
+) {
+  const rewardRedemptionId = getMetadataString(ledgerEvent.metadata, "reward_redemption_id");
+  const rewardRuleId = getMetadataString(ledgerEvent.metadata, "reward_rule_id");
+  const deletedFields = buildDeletedFields(actorLabel, deletionReason);
+
+  if (rewardRedemptionId) {
+    const { error: rewardRedemptionError } = await supabase
+      .from("reward_redemptions")
+      .update(deletedFields)
+      .eq("id", rewardRedemptionId)
+      .eq("user_id", userId)
+      .is("deleted_at", null);
+
+    if (rewardRedemptionError) {
+      throw new Error(toErrorMessage(rewardRedemptionError, "Could not delete the reward redemption."));
+    }
+  }
+
+  if (rewardRuleId) {
+    const { error: rewardRuleError } = await supabase
+      .from("reward_rules")
+      .update(deletedFields)
+      .eq("id", rewardRuleId)
+      .eq("user_id", userId)
+      .is("deleted_at", null);
+
+    if (rewardRuleError) {
+      throw new Error(toErrorMessage(rewardRuleError, "Could not delete the reward rule."));
+    }
+  }
+
+  const { error: ledgerEventError } = await supabase
+    .from("ledger_events")
+    .update(deletedFields)
+    .eq("id", ledgerEvent.id)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (ledgerEventError) {
+    throw new Error(toErrorMessage(ledgerEventError, "Could not delete the reward ledger event."));
+  }
+}
+
+export function isEditableLedgerEvent(event: LedgerEvent) {
+  return (
+    (event.event_type === "work_earned" && event.source === "manual_entry") ||
+    (event.event_type === "reward_spent" && event.source === "manual_reward_redemption")
+  );
+}
+
+export function isDeletableLedgerEvent(event: LedgerEvent) {
+  if (event.event_type === "reward_spent" && event.source === "manual_reward_redemption") {
+    return true;
+  }
+
+  return event.event_type === "work_earned" && (event.source === "manual_entry" || event.source === "pomodoro_timer");
+}
+
+export function getManualWorkDefaultsFromLedgerEvent(event: LedgerEvent) {
+  return {
+    durationMinutes: getMetadataNumber(event.metadata, "duration_minutes"),
+    note: getMetadataString(event.metadata, "note"),
+    workBlockId: getMetadataString(event.metadata, "work_block_id"),
+  };
+}
+
+export function getRewardSpendDefaultsFromLedgerEvent(event: LedgerEvent) {
+  return {
+    notes: getMetadataString(event.metadata, "notes") ?? "",
+    rewardMinutes: getMetadataNumber(event.metadata, "reward_minutes"),
   };
 }

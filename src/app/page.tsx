@@ -25,16 +25,26 @@ import {
   ensureHousekeepingTask,
   fetchDailyFocusItems,
   fetchMostRecentAttributedTaskId,
+  fetchTasksByIds,
 } from "@/lib/tasks";
 import { rewardPalette, timerPalette } from "@/lib/timerPalette";
 import {
   AUTH_REQUIRED_MESSAGE,
   ensureWorkspaceUser,
+  fetchAttributionSelectionsForWorkBlock,
   fetchWorkspaceData,
+  getManualWorkDefaultsFromLedgerEvent,
+  getRewardSpendDefaultsFromLedgerEvent,
+  isDeletableLedgerEvent,
+  isEditableLedgerEvent,
   persistCompletedWorkSession,
   persistManualWorkBlock,
   persistRewardSpend,
   persistWorkBlockAttributions,
+  softDeleteRewardSpendEvent,
+  softDeleteWorkEvent,
+  updateManualWorkEntry,
+  updateRewardSpendEntry,
 } from "@/lib/workspace";
 import { archiveTask, completeTask, removeTaskFromDailyFocus } from "@/lib/tasks";
 import type { DailyFocusItemWithTask, LedgerEvent, Task, TimerMode, TimerSession, WorkBlock } from "@/lib/types";
@@ -60,6 +70,7 @@ type PersistenceState =
   | { kind: "error"; message: string };
 
 type AttributionSelectionState = {
+  availableTasks: Task[];
   choresTask: Task;
   otherSelected: boolean;
   otherTitle: string;
@@ -69,6 +80,19 @@ type AttributionSelectionState = {
 type AttributionDialogState = AttributionSelectionState & {
   ledgerEvent: LedgerEvent;
   workBlock: WorkBlock;
+};
+
+type ManualWorkDialogMode =
+  | { kind: "create" }
+  | { kind: "edit"; ledgerEvent: LedgerEvent };
+
+type RewardDialogMode =
+  | { kind: "create" }
+  | { kind: "edit"; ledgerEvent: LedgerEvent };
+
+type LedgerDeleteDialogState = {
+  event: LedgerEvent;
+  reason: string;
 };
 
 function isToday(isoTimestamp: string) {
@@ -203,8 +227,8 @@ function inputClassName() {
 }
 
 type AttributionFieldsProps = {
+  availableTasks: Task[];
   choresTask: Task;
-  dailyFocusItems: DailyFocusItemWithTask[];
   durationMinutes: number;
   emptyStateMessage: string;
   onOtherSelectedChange: (checked: boolean) => void;
@@ -216,8 +240,8 @@ type AttributionFieldsProps = {
 };
 
 function AttributionFields({
+  availableTasks,
   choresTask,
-  dailyFocusItems,
   durationMinutes,
   emptyStateMessage,
   onOtherSelectedChange,
@@ -230,26 +254,26 @@ function AttributionFields({
   return (
     <div className="space-y-5">
       <div className="space-y-3">
-        {dailyFocusItems.length > 0 ? (
-          dailyFocusItems.map((item) => {
-            const checked = selectedTaskIds.includes(item.task.id);
+        {availableTasks.length > 0 ? (
+          availableTasks.map((task) => {
+            const checked = selectedTaskIds.includes(task.id);
 
             return (
               <label
-                key={item.id}
+                key={task.id}
                 className="flex items-start gap-3 rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3"
               >
                 <input
                   checked={checked}
                   className="mt-1 h-4 w-4 accent-[var(--accent)]"
-                  onChange={() => onToggleTask(item.task.id)}
+                  onChange={() => onToggleTask(task.id)}
                   type="checkbox"
                 />
                 <div className="space-y-1">
-                  <p className="text-sm font-medium text-slate-950">{item.task.title}</p>
+                  <p className="text-sm font-medium text-slate-950">{task.title}</p>
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    {item.task.priority}
-                    {item.task.area ? ` · ${item.task.area}` : ""}
+                    {task.priority}
+                    {task.area ? ` · ${task.area}` : ""}
                   </p>
                 </div>
               </label>
@@ -391,14 +415,17 @@ export default function HomePage() {
   const [dailyFocusNotice, setDailyFocusNotice] = useState<string | null>(null);
   const [attributionDialogState, setAttributionDialogState] = useState<AttributionDialogState | null>(null);
   const [manualAttributionState, setManualAttributionState] = useState<AttributionSelectionState | null>(null);
+  const [manualWorkDialogMode, setManualWorkDialogMode] = useState<ManualWorkDialogMode>({ kind: "create" });
   const [manualWorkMinutes, setManualWorkMinutes] = useState("50");
   const [manualWorkNote, setManualWorkNote] = useState("");
   const [isManualDialogOpen, setIsManualDialogOpen] = useState(false);
   const [isRewardDialogOpen, setIsRewardDialogOpen] = useState(false);
+  const [rewardDialogMode, setRewardDialogMode] = useState<RewardDialogMode>({ kind: "create" });
   const [rewardHours, setRewardHours] = useState("0");
   const [rewardMinutes, setRewardMinutes] = useState("0");
   const [rewardDayOffset, setRewardDayOffset] = useState(0);
   const [rewardNote, setRewardNote] = useState("");
+  const [ledgerDeleteDialogState, setLedgerDeleteDialogState] = useState<LedgerDeleteDialogState | null>(null);
   const handledCompletionKeysRef = useRef(new Set<string>());
 
   const dedupedWorkBlocks = useMemo(
@@ -641,7 +668,28 @@ export default function HomePage() {
     }
   };
 
-  const prepareAttributionSelectionState = async (): Promise<AttributionSelectionState> => {
+  const reloadWorkspaceData = async (userId: string) => {
+    if (!supabase) {
+      return;
+    }
+
+    const workspaceData = await fetchWorkspaceData(supabase, userId);
+    setLocalLedgerState(workspaceData);
+  };
+
+  const getRewardDayOffsetFromTimestamp = (isoTimestamp: string) => {
+    const target = new Date(isoTimestamp);
+    target.setHours(12, 0, 0, 0);
+    const today = getRewardReportDate(0);
+    const millisPerDay = 24 * 60 * 60 * 1000;
+    return Math.round((target.getTime() - today.getTime()) / millisPerDay);
+  };
+
+  const prepareAttributionSelectionState = async ({
+    preselectedTaskIds,
+  }: {
+    preselectedTaskIds?: string[];
+  } = {}): Promise<AttributionSelectionState> => {
     if (!supabase || !workspaceUserId) {
       throw new Error("Workspace is not connected yet. Wait for the connection to finish before attributing work.");
     }
@@ -655,15 +703,34 @@ export default function HomePage() {
     setDailyFocusItems(focusItems);
     setDailyFocusNotice(null);
 
-    const defaultTaskId = focusItems.some((item) => item.task_id === mostRecentTaskId)
-      ? mostRecentTaskId
-      : focusItems[0]?.task_id ?? choresTask.id;
+    const focusTasks = focusItems.map((item) => item.task);
+    const normalizedPreselectedTaskIds = preselectedTaskIds?.filter((taskId) => taskId !== choresTask.id) ?? [];
+    const missingTaskIds = normalizedPreselectedTaskIds.filter(
+      (taskId) => !focusTasks.some((task) => task.id === taskId),
+    );
+    const additionalTasks = missingTaskIds.length > 0
+      ? await fetchTasksByIds(supabase, workspaceUserId, missingTaskIds)
+      : [];
+    const availableTasks = [...focusTasks, ...additionalTasks].filter(
+      (task, index, tasks) => tasks.findIndex((candidate) => candidate.id === task.id) === index,
+    );
+    const defaultTaskId = preselectedTaskIds && preselectedTaskIds.length > 0
+      ? null
+      : focusItems.some((item) => item.task_id === mostRecentTaskId)
+        ? mostRecentTaskId
+        : focusItems[0]?.task_id ?? choresTask.id;
+    const selectedTaskIds = preselectedTaskIds && preselectedTaskIds.length > 0
+      ? Array.from(new Set(preselectedTaskIds))
+      : defaultTaskId
+        ? [defaultTaskId]
+        : [];
 
     return {
+      availableTasks,
       choresTask,
       otherSelected: false,
       otherTitle: "",
-      selectedTaskIds: defaultTaskId ? [defaultTaskId] : [],
+      selectedTaskIds,
     };
   };
 
@@ -709,6 +776,9 @@ export default function HomePage() {
 
     try {
       const selectionState = await prepareAttributionSelectionState();
+      setManualWorkDialogMode({ kind: "create" });
+      setManualWorkMinutes("50");
+      setManualWorkNote("");
       setManualAttributionState(selectionState);
       setIsManualDialogOpen(true);
       setPersistenceState({
@@ -828,41 +898,60 @@ export default function HomePage() {
     });
 
     try {
-      const artifacts = await persistManualWorkBlock(supabase, {
-        completedAt: new Date().toISOString(),
-        durationMinutes,
-        note: manualWorkNote,
-        userId: workspaceUserId,
-      });
-
       const selections = await buildAttributionSelections({
-        actorLabel: "Manual work",
-        humanSummary: "Captured from manual work dialog.",
-        reason: "Created from manual work attribution",
+        actorLabel: manualWorkDialogMode.kind === "edit" ? "Manual work edit" : "Manual work",
+        humanSummary:
+          manualWorkDialogMode.kind === "edit"
+            ? "Updated from manual work edit dialog."
+            : "Captured from manual work dialog.",
+        reason:
+          manualWorkDialogMode.kind === "edit"
+            ? "Created while editing a manual work attribution"
+            : "Created from manual work attribution",
         selectionState: manualAttributionState,
       });
 
-      const attributionResult = await persistWorkBlockAttributions(supabase, {
-        durationMinutes,
-        ledgerEvent: artifacts.ledgerEvent,
-        selections,
-        userId: workspaceUserId,
-        workBlockId: artifacts.workBlock.id,
-      });
+      if (manualWorkDialogMode.kind === "edit") {
+        await updateManualWorkEntry(supabase, {
+          actorLabel: "Manual work edit",
+          durationMinutes,
+          ledgerEvent: manualWorkDialogMode.ledgerEvent,
+          note: manualWorkNote,
+          selections,
+          userId: workspaceUserId,
+        });
+        await reloadWorkspaceData(workspaceUserId);
+      } else {
+        const artifacts = await persistManualWorkBlock(supabase, {
+          completedAt: new Date().toISOString(),
+          durationMinutes,
+          note: manualWorkNote,
+          userId: workspaceUserId,
+        });
 
-      setLocalLedgerState((current) => ({
-        ledgerEvents: [attributionResult.ledgerEvent, ...current.ledgerEvents],
-        timerSessions: [artifacts.timerSession, ...current.timerSessions],
-        workBlocks: [artifacts.workBlock, ...current.workBlocks],
-      }));
+        await persistWorkBlockAttributions(supabase, {
+          durationMinutes,
+          ledgerEvent: artifacts.ledgerEvent,
+          note: manualWorkNote,
+          selections,
+          userId: workspaceUserId,
+          workBlockId: artifacts.workBlock.id,
+        });
+
+        await reloadWorkspaceData(workspaceUserId);
+      }
+
       await reloadDailyFocusItems(workspaceUserId);
       setManualWorkNote("");
       setManualWorkMinutes("50");
       setManualAttributionState(null);
+      setManualWorkDialogMode({ kind: "create" });
       setIsManualDialogOpen(false);
       setPersistenceState({
         kind: "saved",
-        message: "Manual work block saved and attributed",
+        message: manualWorkDialogMode.kind === "edit"
+          ? "Manual work block updated"
+          : "Manual work block saved and attributed",
       });
     } catch (error) {
       setPersistenceState({
@@ -904,27 +993,41 @@ export default function HomePage() {
     });
 
     try {
-      const { ledgerEvent } = await persistRewardSpend(supabase, {
-        costWorkBlocks: derivedCostWorkBlocks,
-        notes: rewardNote,
-        redeemedAt: getRewardReportDate(rewardDayOffset).toISOString(),
-        rewardMinutes: redeemMinutes,
-        rewardName: `${formatDurationLabel(redeemHours, redeemMinutePortion)} reward block`,
-        userId: workspaceUserId,
-      });
+      const rewardName = `${formatDurationLabel(redeemHours, redeemMinutePortion)} reward block`;
+      const redeemedAt = getRewardReportDate(rewardDayOffset).toISOString();
 
-      setLocalLedgerState((current) => ({
-        ...current,
-        ledgerEvents: [ledgerEvent, ...current.ledgerEvents],
-      }));
+      if (rewardDialogMode.kind === "edit") {
+        await updateRewardSpendEntry(supabase, {
+          costWorkBlocks: derivedCostWorkBlocks,
+          ledgerEvent: rewardDialogMode.ledgerEvent,
+          notes: rewardNote,
+          redeemedAt,
+          rewardMinutes: redeemMinutes,
+          rewardName,
+          userId: workspaceUserId,
+        });
+        await reloadWorkspaceData(workspaceUserId);
+      } else {
+        await persistRewardSpend(supabase, {
+          costWorkBlocks: derivedCostWorkBlocks,
+          notes: rewardNote,
+          redeemedAt,
+          rewardMinutes: redeemMinutes,
+          rewardName,
+          userId: workspaceUserId,
+        });
+        await reloadWorkspaceData(workspaceUserId);
+      }
+
       setRewardHours("0");
       setRewardMinutes("0");
       setRewardNote("");
       setRewardDayOffset(0);
+      setRewardDialogMode({ kind: "create" });
       setIsRewardDialogOpen(false);
       setPersistenceState({
         kind: "saved",
-        message: "Reward spend saved",
+        message: rewardDialogMode.kind === "edit" ? "Reward spend updated" : "Reward spend saved",
       });
     } catch (error) {
       setPersistenceState({
@@ -1074,8 +1177,7 @@ export default function HomePage() {
       throw new Error("Workspace is not connected yet. Wait for the connection to finish before attributing work.");
     }
 
-    const selectedTasks = dailyFocusItems
-      .map((item) => item.task)
+    const selectedTasks = selectionState.availableTasks
       .filter((task, index, tasks) =>
         selectionState.selectedTaskIds.includes(task.id) &&
         tasks.findIndex((candidate) => candidate.id === task.id) === index,
@@ -1181,6 +1283,132 @@ export default function HomePage() {
       setPersistenceState({
         kind: "error",
         message: error.message || "Could not sign out.",
+      });
+    }
+  };
+
+  const handleRequestLedgerEdit = async (event: LedgerEvent) => {
+    if (!supabase || !workspaceUserId) {
+      return;
+    }
+
+    try {
+      if (event.event_type === "work_earned" && event.source === "manual_entry") {
+        const defaults = getManualWorkDefaultsFromLedgerEvent(event);
+
+        if (!defaults.workBlockId || !defaults.durationMinutes) {
+          throw new Error("This manual work event is missing its linked work block details.");
+        }
+
+        const selections = await fetchAttributionSelectionsForWorkBlock(supabase, {
+          userId: workspaceUserId,
+          workBlockId: defaults.workBlockId,
+        });
+        const selectionState = await prepareAttributionSelectionState({
+          preselectedTaskIds: selections.map((selection) => selection.taskId),
+        });
+
+        setManualWorkDialogMode({
+          kind: "edit",
+          ledgerEvent: event,
+        });
+        setManualAttributionState({
+          ...selectionState,
+          selectedTaskIds: selections.map((selection) => selection.taskId),
+        });
+        setManualWorkMinutes(String(defaults.durationMinutes));
+        setManualWorkNote(defaults.note ?? "");
+        setIsManualDialogOpen(true);
+        setPersistenceState({
+          kind: "ready",
+          message: "Editing manual work block",
+        });
+        return;
+      }
+
+      if (event.event_type === "reward_spent" && event.source === "manual_reward_redemption") {
+        const defaults = getRewardSpendDefaultsFromLedgerEvent(event);
+        const rewardMinutesValue = defaults.rewardMinutes ?? 0;
+        const rewardHoursValue = Math.floor(rewardMinutesValue / 60);
+        const rewardMinuteValue = rewardMinutesValue % 60;
+
+        setRewardDialogMode({
+          kind: "edit",
+          ledgerEvent: event,
+        });
+        setRewardHours(String(rewardHoursValue));
+        setRewardMinutes(String(rewardMinuteValue));
+        setRewardDayOffset(getRewardDayOffsetFromTimestamp(event.created_at));
+        setRewardNote(defaults.notes);
+        setIsRewardDialogOpen(true);
+        setPersistenceState({
+          kind: "ready",
+          message: "Editing reward spend",
+        });
+      }
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not prepare the ledger edit.",
+      });
+    }
+  };
+
+  const handleRequestLedgerDelete = (event: LedgerEvent) => {
+    setLedgerDeleteDialogState({
+      event,
+      reason: "",
+    });
+  };
+
+  const handleConfirmLedgerDelete = async () => {
+    if (!supabase || !workspaceUserId || !ledgerDeleteDialogState) {
+      return;
+    }
+
+    const trimmedReason = ledgerDeleteDialogState.reason.trim();
+
+    if (!trimmedReason) {
+      setPersistenceState({
+        kind: "error",
+        message: "Add a short deletion reason before removing a ledger event.",
+      });
+      return;
+    }
+
+    setPersistenceState({
+      kind: "saving",
+      message: "Deleting ledger event...",
+    });
+
+    try {
+      if (ledgerDeleteDialogState.event.event_type === "reward_spent") {
+        await softDeleteRewardSpendEvent(supabase, {
+          actorLabel: "Recent activity",
+          deletionReason: trimmedReason,
+          ledgerEvent: ledgerDeleteDialogState.event,
+          userId: workspaceUserId,
+        });
+      } else {
+        await softDeleteWorkEvent(supabase, {
+          actorLabel: "Recent activity",
+          deletionReason: trimmedReason,
+          ledgerEvent: ledgerDeleteDialogState.event,
+          userId: workspaceUserId,
+        });
+      }
+
+      await reloadWorkspaceData(workspaceUserId);
+      await reloadDailyFocusItems(workspaceUserId);
+      setLedgerDeleteDialogState(null);
+      setPersistenceState({
+        kind: "saved",
+        message: "Ledger event deleted",
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not delete the ledger event.",
       });
     }
   };
@@ -1477,6 +1705,10 @@ export default function HomePage() {
                 <LedgerEventList
                   emptyMessage="Finish a work timer to create your first saved ledger event."
                   events={recentLedgerEvents}
+                  onRequestDelete={handleRequestLedgerDelete}
+                  onRequestEdit={handleRequestLedgerEdit}
+                  showDeleteAction={isDeletableLedgerEvent}
+                  showEditAction={isEditableLedgerEvent}
                 />
               }
               title="Recent activity"
@@ -1491,11 +1723,12 @@ export default function HomePage() {
         onClose={() => {
           setIsManualDialogOpen(false);
           setManualAttributionState(null);
+          setManualWorkDialogMode({ kind: "create" });
           setManualWorkMinutes("50");
           setManualWorkNote("");
         }}
         open={isManualDialogOpen}
-        title="Add missed work"
+        title={manualWorkDialogMode.kind === "edit" ? "Edit work block" : "Add missed work"}
       >
         {manualAttributionState ? (
           <div className="space-y-5">
@@ -1517,8 +1750,8 @@ export default function HomePage() {
             </div>
 
             <AttributionFields
+              availableTasks={manualAttributionState.availableTasks}
               choresTask={manualAttributionState.choresTask}
-              dailyFocusItems={dailyFocusItems}
               durationMinutes={Number.parseInt(manualWorkMinutes, 10) || 0}
               emptyStateMessage="No today-list tasks are available, so chores or other are the current attribution options."
               onOtherSelectedChange={(checked) =>
@@ -1536,7 +1769,7 @@ export default function HomePage() {
             />
 
             <Button className="w-full" onClick={handleManualWorkAdd} variant="secondary">
-              Save work block
+              {manualWorkDialogMode.kind === "edit" ? "Save changes" : "Save work block"}
             </Button>
           </div>
         ) : null}
@@ -1545,13 +1778,14 @@ export default function HomePage() {
       <Dialog
         onClose={() => {
           setIsRewardDialogOpen(false);
+          setRewardDialogMode({ kind: "create" });
           setRewardHours("0");
           setRewardMinutes("0");
           setRewardDayOffset(0);
           setRewardNote("");
         }}
         open={isRewardDialogOpen}
-        title="Spend reward"
+        title={rewardDialogMode.kind === "edit" ? "Edit reward spend" : "Spend reward"}
       >
         <div className="space-y-4">
           <div className="space-y-2">
@@ -1613,7 +1847,7 @@ export default function HomePage() {
             value={rewardNote}
           />
           <Button className="w-full" onClick={handleRewardSpend} variant="secondary">
-            Spend reward
+            {rewardDialogMode.kind === "edit" ? "Save changes" : "Spend reward"}
           </Button>
         </div>
       </Dialog>
@@ -1633,8 +1867,8 @@ export default function HomePage() {
               Split this completed work block across the tasks it supported.
             </p>
             <AttributionFields
+              availableTasks={attributionDialogState.availableTasks}
               choresTask={attributionDialogState.choresTask}
-              dailyFocusItems={dailyFocusItems}
               durationMinutes={attributionDialogState.workBlock.duration_minutes}
               emptyStateMessage="No today-list tasks are available, so chores or other are the current attribution options."
               onOtherSelectedChange={(checked) =>
@@ -1654,6 +1888,45 @@ export default function HomePage() {
             <div className="flex justify-end">
               <Button onClick={handleSaveWorkAttribution} variant="secondary">
                 Save attribution
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
+
+      <Dialog
+        onClose={() => setLedgerDeleteDialogState(null)}
+        open={Boolean(ledgerDeleteDialogState)}
+        title="Delete ledger event"
+      >
+        {ledgerDeleteDialogState ? (
+          <div className="space-y-5">
+            <p className="text-sm leading-6 text-slate-600">
+              This will hide the event from the active ledger and preserve a deletion note for future traceability.
+            </p>
+            <div className="rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
+              <p className="text-sm font-medium text-slate-950">
+                {ledgerDeleteDialogState.event.event_type === "reward_spent" ? "Reward spend" : "Work event"}
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                {formatTimestamp(ledgerDeleteDialogState.event.created_at)} via {ledgerDeleteDialogState.event.source.replaceAll("_", " ")}
+              </p>
+            </div>
+            <ActionField
+              label="Deletion reason"
+              onChange={(event) =>
+                setLedgerDeleteDialogState((current) =>
+                  current ? { ...current, reason: event.target.value } : current
+                )}
+              placeholder="Why should this event be removed?"
+              value={ledgerDeleteDialogState.reason}
+            />
+            <div className="flex justify-end gap-3">
+              <Button onClick={() => setLedgerDeleteDialogState(null)} variant="text">
+                Cancel
+              </Button>
+              <Button onClick={handleConfirmLedgerDelete} variant="secondary">
+                Delete event
               </Button>
             </div>
           </div>

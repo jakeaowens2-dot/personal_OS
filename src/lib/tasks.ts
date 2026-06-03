@@ -260,6 +260,28 @@ export async function fetchTasks(
   return sortTasks((data ?? []) as unknown as Task[]);
 }
 
+export async function fetchTasksByIds(
+  supabase: SupabaseClient,
+  userId: string,
+  taskIds: string[],
+) {
+  if (taskIds.length === 0) {
+    return [] as Task[];
+  }
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(TASK_SELECT_COLUMNS)
+    .eq("user_id", userId)
+    .in("id", taskIds);
+
+  if (error) {
+    throw new Error(enhanceTaskStorageError(toErrorMessage(error, "Could not load tasks."), "task"));
+  }
+
+  return sortTasks((data ?? []) as unknown as Task[]);
+}
+
 export async function fetchTaskRevisions(supabase: SupabaseClient, taskId: string, userId: string) {
   const { data, error } = await supabase
     .from("task_revisions")
