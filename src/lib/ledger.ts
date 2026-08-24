@@ -1,8 +1,10 @@
 import { getModeDurationMinutes } from "@/lib/timer";
+import { workBlockDeltaForDuration } from "@/lib/economy";
 import type { LedgerEvent, TimerMode, TimerSession, WorkBlock } from "@/lib/types";
 
 type CreateLocalCompletionArtifactsInput = {
   completedAt?: Date;
+  durationMinutes?: number;
   mode: TimerMode;
   userId?: string;
 };
@@ -42,6 +44,7 @@ export function dedupeLedgerEvents(ledgerEvents: LedgerEvent[]) {
 
 export function createLocalCompletionArtifacts({
   completedAt = new Date(),
+  durationMinutes,
   mode,
   userId = LOCAL_USER_ID,
 }: CreateLocalCompletionArtifactsInput): CompletionArtifacts | null {
@@ -49,16 +52,16 @@ export function createLocalCompletionArtifacts({
     return null;
   }
 
-  const durationMinutes = getModeDurationMinutes(mode);
+  const resolvedDurationMinutes = durationMinutes ?? getModeDurationMinutes(mode);
   const endedAt = completedAt.toISOString();
-  const startedAt = new Date(completedAt.getTime() - durationMinutes * 60 * 1000).toISOString();
+  const startedAt = new Date(completedAt.getTime() - resolvedDurationMinutes * 60 * 1000).toISOString();
   const timerSessionId = crypto.randomUUID();
 
   const timerSession: TimerSession = {
     id: timerSessionId,
     user_id: userId,
     mode,
-    planned_minutes: durationMinutes,
+    planned_minutes: resolvedDurationMinutes,
     started_at: startedAt,
     ended_at: endedAt,
     completed: true,
@@ -71,7 +74,7 @@ export function createLocalCompletionArtifacts({
     user_id: userId,
     timer_session_id: timerSession.id,
     earned_at: endedAt,
-    duration_minutes: durationMinutes,
+    duration_minutes: resolvedDurationMinutes,
     tag: null,
     quality_rating: null,
   };
@@ -80,14 +83,14 @@ export function createLocalCompletionArtifacts({
     id: crypto.randomUUID(),
     user_id: userId,
     event_type: "work_earned",
-    delta_work_blocks: 1,
+    delta_work_blocks: workBlockDeltaForDuration(resolvedDurationMinutes),
     delta_reward_blocks: 0,
     source: "pomodoro_timer",
     metadata: {
       timer_session_id: timerSession.id,
       work_block_id: workBlock.id,
       mode,
-      duration_minutes: durationMinutes,
+      duration_minutes: resolvedDurationMinutes,
     },
     created_at: endedAt,
   };

@@ -1,13 +1,21 @@
 import { Badge } from "@/components/ui/Badge";
-import { rewardPalette, timerPalette } from "@/lib/timerPalette";
-import type { LedgerEvent } from "@/lib/types";
+import { PopoverMenu } from "@/components/ui/PopoverMenu";
+import { getBehaviorTypeLabel } from "@/lib/behaviors";
+import { exercisePalette, penaltyPalette, rewardPalette, timerPalette } from "@/lib/timerPalette";
+import type { BehaviorEvent, LedgerEvent } from "@/lib/types";
+
+export type ActivityItem =
+  | { kind: "ledger"; event: LedgerEvent }
+  | { kind: "behavior"; event: BehaviorEvent };
 
 type LedgerEventListProps = {
   emptyMessage: string;
-  events: LedgerEvent[];
+  items: ActivityItem[];
   maxItems?: number;
   onRequestDelete?: (event: LedgerEvent) => void;
   onRequestEdit?: (event: LedgerEvent) => void;
+  onRequestDeleteBehavior?: (event: BehaviorEvent) => void;
+  onRequestEditBehavior?: (event: BehaviorEvent) => void;
   showDeleteAction?: (event: LedgerEvent) => boolean;
   showEditAction?: (event: LedgerEvent) => boolean;
 };
@@ -91,52 +99,130 @@ function getDeltaSwatchColor(event: LedgerEvent) {
     : timerPalette.work.progress;
 }
 
+function getBehaviorDisplayType(event: BehaviorEvent) {
+  return getBehaviorTypeLabel(event.behavior_type);
+}
+
+function getBehaviorDeltaLabel(event: BehaviorEvent) {
+  if (event.behavior_type === "exercise") {
+    return `+${Math.ceil(event.duration_minutes ?? 0)} min reward`;
+  }
+
+  return `-${Math.ceil(event.penalty_minutes ?? 0)} min reward`;
+}
+
+function getBehaviorDetail(event: BehaviorEvent) {
+  const base = formatTimestamp(event.occurred_at);
+  return event.note ? `${base} · ${event.note}` : base;
+}
+
+function getBehaviorSwatchColor(event: BehaviorEvent) {
+  return event.behavior_type === "exercise" ? exercisePalette.progress : penaltyPalette.progress;
+}
+
 export function LedgerEventList({
   emptyMessage,
-  events,
+  items,
   maxItems,
   onRequestDelete,
   onRequestEdit,
+  onRequestDeleteBehavior,
+  onRequestEditBehavior,
   showDeleteAction,
   showEditAction,
 }: LedgerEventListProps) {
-  const visibleEvents = typeof maxItems === "number" ? events.slice(0, maxItems) : events;
+  const visibleItems = typeof maxItems === "number" ? items.slice(0, maxItems) : items;
 
-  if (visibleEvents.length === 0) {
+  if (visibleItems.length === 0) {
     return <div className="px-1 py-4 text-sm text-slate-600">{emptyMessage}</div>;
   }
 
   return (
     <div className="space-y-3">
-      {visibleEvents.map((event) => (
-        <article
-          key={event.id}
-          className="flex flex-wrap items-start justify-between gap-4 border-t border-slate-300/60 px-1 py-4 first:border-t-0"
-        >
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className="normal-case tracking-normal" tone="neutral">
-                {getEventDisplayType(event)}
-              </Badge>
-              <span className="text-sm font-medium text-slate-900">{getDeltaLabel(event)}</span>
+      {visibleItems.map((item) => {
+        if (item.kind === "behavior") {
+          const event = item.event;
+
+          return (
+            <article
+              key={`behavior-${event.id}`}
+              className="flex items-start justify-between gap-4 border-t border-slate-300/60 px-1 py-4 first:border-t-0"
+            >
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge className="normal-case tracking-normal" tone="neutral">
+                    {getBehaviorDisplayType(event)}
+                  </Badge>
+                  <span className="text-sm font-medium text-slate-900">{getBehaviorDeltaLabel(event)}</span>
+                </div>
+                <p className="text-sm text-slate-600">{getBehaviorDetail(event)}</p>
+              </div>
+              <div className="flex items-start gap-3">
+                <span
+                  aria-hidden="true"
+                  className="mt-1 h-3.5 w-3.5 rounded-[4px]"
+                  style={{ backgroundColor: getBehaviorSwatchColor(event) }}
+                />
+                {onRequestEditBehavior || onRequestDeleteBehavior ? (
+                  <PopoverMenu
+                    buttonClassName="-mt-1 px-2 py-0.5 text-lg font-semibold leading-none text-slate-500 hover:text-slate-900"
+                    label="⋯"
+                  >
+                    {onRequestEditBehavior ? (
+                      <button
+                        className="block w-full rounded-[0.6rem] px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/90 hover:text-slate-950"
+                        onClick={() => onRequestEditBehavior(event)}
+                        type="button"
+                      >
+                        Edit
+                      </button>
+                    ) : null}
+                    {onRequestDeleteBehavior ? (
+                      <button
+                        className="block w-full rounded-[0.6rem] px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/90 hover:text-slate-950"
+                        onClick={() => onRequestDeleteBehavior(event)}
+                        type="button"
+                      >
+                        Delete
+                      </button>
+                    ) : null}
+                  </PopoverMenu>
+                ) : null}
+              </div>
+            </article>
+          );
+        }
+
+        const event = item.event;
+
+        return (
+          <article
+            key={event.id}
+            className="flex items-start justify-between gap-4 border-t border-slate-300/60 px-1 py-4 first:border-t-0"
+          >
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="normal-case tracking-normal" tone="neutral">
+                  {getEventDisplayType(event)}
+                </Badge>
+                <span className="text-sm font-medium text-slate-900">{getDeltaLabel(event)}</span>
+              </div>
+              <div>
+                <p className="font-medium text-slate-900">{getEventTitle(event)}</p>
+                <p className="mt-1 text-sm text-slate-600">{getEventDetail(event)}</p>
+              </div>
             </div>
-            <div>
-              <p className="font-medium text-slate-900">{getEventTitle(event)}</p>
-              <p className="mt-1 text-sm text-slate-600">{getEventDetail(event)}</p>
-            </div>
-          </div>
-          <div className="flex items-start gap-3">
-            <span
-              aria-hidden="true"
-              className="mt-1 h-3.5 w-3.5 rounded-[4px]"
-              style={{ backgroundColor: getDeltaSwatchColor(event) }}
-            />
-            {onRequestEdit || onRequestDelete ? (
-              <details className="relative">
-                <summary className="cursor-pointer list-none rounded-[0.6rem] px-2 py-1 text-sm text-slate-400 transition hover:bg-slate-100 hover:text-slate-700">
-                  ...
-                </summary>
-                <div className="absolute right-0 top-8 z-20 min-w-32 rounded-[0.8rem] border border-slate-200/90 bg-white/95 p-2 shadow-[0_16px_28px_rgba(15,23,42,0.1)]">
+            <div className="flex items-start gap-3">
+              <span
+                aria-hidden="true"
+                className="mt-1 h-3.5 w-3.5 rounded-[4px]"
+                style={{ backgroundColor: getDeltaSwatchColor(event) }}
+              />
+              {onRequestEdit || onRequestDelete ? (
+                <PopoverMenu
+                  buttonClassName="-mt-1 px-2 py-0.5 text-lg font-semibold leading-none text-slate-500 hover:text-slate-900"
+                  label="⋯"
+                >
                   {onRequestEdit && (showEditAction ? showEditAction(event) : true) ? (
                     <button
                       className="block w-full rounded-[0.6rem] px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/90 hover:text-slate-950"
@@ -155,12 +241,12 @@ export function LedgerEventList({
                       Delete
                     </button>
                   ) : null}
-                </div>
-              </details>
-            ) : null}
-          </div>
-        </article>
-      ))}
+                </PopoverMenu>
+              ) : null}
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }

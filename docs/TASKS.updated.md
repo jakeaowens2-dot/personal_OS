@@ -300,6 +300,160 @@ Acceptance criteria:
 
 ---
 
+## Phase 5.5 — Core Work/Reward Refinements and Behavior Tracking
+
+Status context: These tasks extend the existing timer/ledger/reward loop (Phases 1–3) and are independent of the Phase 6+ agent-contract roadmap. Implement in the order listed.
+
+> All six tasks (5.5.1–5.5.6) are complete as of 2026-08-23. Verified with `npm run lint`, `npm run typecheck`, and `npm run build`; the two new migrations were applied to the live Supabase project.
+>
+> **Economy rework (2026-08-23):** the block/economy model was codified in `docs/ECONOMY.md` and implemented in `src/lib/economy.ts`. Key corrections over the initial 5.5.x implementation:
+> - 1 block = 1 hour in every currency; partial blocks render with light + dark fill.
+> - Work blocks = `work_minutes / 50`; reward earned at 20/30 min per work block (duration-derived, fixing the "1 reward block per work block" bug).
+> - Long-flow sessions log total duration → multiple work blocks + proportional reward, then instantiate an extended break (10 min rest per 50 min work).
+> - Settlement order (penalty → debt → positive): penalties are a senior claim, overspend becomes blue dashed-outline "debt" blocks, and both fill before positive reward accrues.
+> - Behavior entries (indulgence/screen time/exercise) are now editable and deletable via the "⋯" menu, and `hardResetWorkspace` clears them.
+
+### 5.5.1 Undo work blocks from Recent Activity
+
+Status: Complete
+
+Implementation guidance:
+- Add a text-only "Delete" control (match the "Add manually" button styling under "Today's work") to each deletable work-block entry in `LedgerEventList`.
+- Show it only for `work_earned` events that `isDeletableLedgerEvent` accepts.
+- Clicking it opens a small "Are you sure?" micro-dialog.
+- On confirm, remove the corresponding rows from Postgres: the ledger event plus its linked `timer_sessions`, `work_blocks`, and `work_block_attributions` rows.
+- Use a hard delete for a true "undo" (see decision below).
+
+Acceptance criteria:
+- A visible "Delete" text button appears on deletable work-block rows.
+- A "Are you sure?" micro-dialog gates the action.
+- Confirming removes the entry from Recent Activity and its linked rows from Postgres.
+- Today's work, reward balance, and weekly overview update after deletion.
+
+Verification:
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build`
+
+Decision to confirm: hard DELETE vs the existing soft-delete (`softDeleteWorkEvent`). Default is hard delete for a real "undo"; soft-delete remains available for the existing correction flow.
+
+### 5.5.2 Hard workspace reset in Settings
+
+Status: Complete
+
+Implementation guidance:
+- Add a "Reset workspace" option to the Home Settings menu (or a dedicated settings route).
+- Gate it behind a strict, irreversible warning before executing.
+- On confirm, hard-delete all work/reward economy rows for the current user: `timer_sessions`, `work_blocks`, `work_block_attributions`, `ledger_events`, `reward_rules`, `reward_redemptions`, and (once added) `behavior_events`.
+- Leave the task vault (`tasks`, `task_revisions`, `daily_focus_lists`, `daily_focus_items`) intact (see decision below).
+
+Acceptance criteria:
+- Reset zeroes today's work, reward balance, weekly overview, and clears Recent Activity.
+- A prominent "cannot be undone" warning gates the action.
+- Reset does not touch canonical task data.
+
+Verification:
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build`
+
+Decision to confirm: reset scope = work/reward economy only, NOT tasks/daily focus.
+
+### 5.5.3 Behavior-tracking subsystem: schema and entry surface
+
+Status: Complete
+
+Implementation guidance:
+- Add a migration for a new `behavior_events` table:
+  - `id`, `user_id` (FK auth.users), `behavior_type` (check in `indulgence | screen_time | exercise`), `occurred_at`, `duration_minutes`, `penalty_minutes`, `note`, soft-delete fields (`deleted_at`, `deleted_by_actor_label`, `deletion_reason`), `created_at`.
+  - RLS policies (select/insert/update own) matching the existing pattern; index on `(user_id, occurred_at desc)`.
+- Add shared types and helpers under `src/lib/behaviors.ts`.
+- Add a "Behavior tracking" text button under "Spend reward".
+- Popup with three selectors:
+  - Indulgent behavior: no extra data; records a flat −60 min penalty.
+  - Screen time: collect date + total screen minutes; apply `penalty = max(0.5 * ST, ST - 60)` (minutes). Examples: 60 → 30, 120 → 60, 150 → 90.
+  - Exercise: collect workout length; records +1:1 positive reward minutes.
+
+Acceptance criteria:
+- Three behavior types are recordable via the popup, each collecting the correct fields.
+- Indulgence → −60 min; screen time → formula above; exercise → +length minutes.
+- Entries persist durably and survive refresh.
+- Screen-time and exercise inputs are tracked separately (distinct `behavior_type` rows).
+
+Verification:
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build`
+
+### 5.5.4 Behavior-aware reward accounting and color typing
+
+Status: Complete
+
+Implementation guidance:
+- Extend reward-balance computation to include behavior events: exercise adds +minutes; indulgence/screen-time subtract penalty minutes.
+- Add color tokens: periwinkle (exercise, positive) and penalty purple to the palette module (hexes tunable).
+- Reward-balance display rule: show blue (work reward) + periwinkle (exercise) blocks when net is positive; show purple penalty blocks only when the net balance is negative. Penalties are always recorded but hidden from the balance section while positive.
+
+Acceptance criteria:
+- Exercise minutes increase the spendable reward balance 1:1.
+- Indulgence and screen-time penalties reduce the reward balance.
+- Periwinkle = exercise blocks; purple = penalty blocks.
+- Purple penalty blocks appear in the reward-balance section only when the net balance is negative.
+
+Verification:
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build`
+
+### 5.5.5 Restructure Weekly Overview (Work / Reward / Penalty)
+
+Status: Complete
+
+Implementation guidance:
+- Rewrite the "Weekly overview" module into three sections: Work, Reward, Penalty.
+- Work: red blocks = weekly work blocks; textual count of total hours.
+- Reward: blue (work-derived) + periwinkle (exercise) blocks; textual summary shows "total:" and "net:" (net = total − penalties).
+- Penalty: purple blocks = weekly penalty minutes (indulgence + screen time).
+- Add "destroyed reward blocks": greyed-out blue blocks with a purple border and a purple "X" overlay, representing reward blocks consumed by penalties.
+
+Acceptance criteria:
+- Three clean sections with per-category block counts and hour totals.
+- Correct color mapping: Work red, Reward blue + periwinkle, Penalty purple.
+- Reward shows "total:" and "net:" values.
+- Destroyed-reward blocks render with the greyed-blue + purple-border + purple-X treatment.
+
+Verification:
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build`
+
+### 5.5.6 Rolling timer with overage mode
+
+Status: Complete
+
+Implementation guidance:
+- After a work session completes: play the chime but do NOT stop or auto-persist. Switch to "overage mode": the timer begins counting up with a "+" prefix (e.g. "+00:32").
+- In overage mode, replace "Pause timer" with "End session".
+- On "End session", show a popup: "Did this session represent uninterrupted work?"
+  - "Yes" → log the total elapsed duration (planned 50 min + overage) as the work block.
+  - "No" → log a single standard work block (50 min).
+- After this choice, proceed into the existing persistence + attribution flow using the chosen duration.
+
+Acceptance criteria:
+- Work completion rings the alarm and rolls into counting-up overage mode.
+- "+" is prepended to the overage count.
+- "Pause timer" becomes "End session" during overage.
+- Ending the session prompts the uninterrupted-work question; "Yes" logs total elapsed, "No" logs a single block.
+
+Verification:
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build`
+
+Decision to confirm: whether overage time earns additional reward (prorated minutes) or only affects logged work duration (default: duration only). Scope is work mode only; break/long-break keep existing fixed-completion behavior.
+
+---
+
 ## Phase 6 — Task Semantics and Agent-Ready Contracts
 
 Phase 6 turns the completed quiet task-management layer into a stable substrate for agent planning. Do not add AI behavior yet. The goal is to remove ambiguity from task state, daily focus state, task history, and lightweight task relationships so later agents can reason over the data safely.

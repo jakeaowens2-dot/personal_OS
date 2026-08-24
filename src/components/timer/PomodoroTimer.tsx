@@ -8,12 +8,13 @@ import { formatTimeRemaining, getModeDurationSeconds, getModeLabel } from "@/lib
 import { timerPalette } from "@/lib/timerPalette";
 import type { TimerMode } from "@/lib/types";
 
-export type TimerStatus = "idle" | "running" | "paused" | "complete";
+export type TimerStatus = "idle" | "running" | "paused" | "complete" | "overage";
 
 const STATUS_COPY: Partial<Record<TimerStatus, string>> = {
   running: "Session running",
   paused: "Paused",
   complete: "Work block complete",
+  overage: "Session rolling",
 };
 
 const MODE_ICON_LABEL: Record<TimerMode, string> = {
@@ -88,26 +89,52 @@ function playCompletionChime() {
   });
 }
 
-type PomodoroTimerProps = {
-  onComplete?: (completion: { completedAt: string; mode: TimerMode }) => void;
-  onStateChange?: (state: { mode: TimerMode; status: TimerStatus }) => void;
+export type SessionEndInfo = {
+  completedAt: string;
+  mode: TimerMode;
+  overageSeconds: number;
 };
 
-export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps) {
+type PomodoroTimerProps = {
+  onComplete?: (completion: { completedAt: string; mode: TimerMode }) => void;
+  onEndSession?: (session: SessionEndInfo) => void;
+  onStateChange?: (state: { mode: TimerMode; status: TimerStatus }) => void;
+  breakRequest?: { token: number; minutes: number } | null;
+};
+
+export function PomodoroTimer({
+  onComplete,
+  onEndSession,
+  onStateChange,
+  breakRequest,
+}: PomodoroTimerProps) {
   const [mode, setMode] = useState<TimerMode>("work");
   const [remainingSeconds, setRemainingSeconds] = useState(getModeDurationSeconds("work"));
   const [status, setStatus] = useState<TimerStatus>("idle");
+  const [overageSeconds, setOverageSeconds] = useState(0);
+  const [breakDurationSeconds, setBreakDurationSeconds] = useState<number | null>(null);
   const [lastCompletedMode, setLastCompletedMode] = useState<TimerMode | null>(null);
   const completionEmittedRef = useRef(false);
   const modeRef = useRef<TimerMode>(mode);
   const remainingSecondsRef = useRef(remainingSeconds);
+  const handledBreakRequestToken = useRef<number | null>(null);
 
   const palette = timerPalette[mode];
-  const totalSeconds = getModeDurationSeconds(mode);
+  const modeTotalSeconds =
+    mode === "break" && breakDurationSeconds != null
+      ? breakDurationSeconds
+      : getModeDurationSeconds(mode);
+  const totalSeconds = modeTotalSeconds;
+  const isOverage = status === "overage";
+
   const progress = useMemo(() => {
+    if (isOverage) {
+      return 100;
+    }
+
     const elapsed = totalSeconds - remainingSeconds;
     return Math.max(0, Math.min(100, (elapsed / totalSeconds) * 100));
-  }, [remainingSeconds, totalSeconds]);
+  }, [remainingSeconds, totalSeconds, isOverage]);
 
   const handleTick = useEffectEvent(() => {
     const current = remainingSecondsRef.current;
@@ -121,12 +148,17 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
       remainingSecondsRef.current = 0;
       setRemainingSeconds(0);
 
-      const completedAt = new Date().toISOString();
       const completedMode = modeRef.current;
-
-      setStatus("complete");
       setLastCompletedMode(completedMode);
-      onComplete?.({ completedAt, mode: completedMode });
+
+      if (completedMode === "work") {
+        // Roll into overage instead of completing: chime, then count up.
+        setOverageSeconds(0);
+        setStatus("overage");
+      } else {
+        setStatus("complete");
+        onComplete?.({ completedAt: new Date().toISOString(), mode: completedMode });
+      }
       return;
     }
 
@@ -148,6 +180,41 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   }, [onComplete, status]);
 
   useEffect(() => {
+    if (status !== "overage") {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setOverageSeconds((current) => current + 1);
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [status]);
+
+  useEffect(() => {
+    if (!breakRequest) {
+      return;
+    }
+
+    if (handledBreakRequestToken.current === breakRequest.token) {
+      return;
+    }
+
+    handledBreakRequestToken.current = breakRequest.token;
+    const seconds = breakRequest.minutes * 60;
+
+    completionEmittedRef.current = false;
+    modeRef.current = "break";
+    setMode("break");
+    setBreakDurationSeconds(seconds);
+    setRemainingSeconds(seconds);
+    remainingSecondsRef.current = seconds;
+    setOverageSeconds(0);
+    setStatus("idle");
+    setLastCompletedMode(null);
+  }, [breakRequest]);
+
+  useEffect(() => {
     onStateChange?.({ mode, status });
   }, [mode, onStateChange, status]);
 
@@ -162,6 +229,8 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   useEffect(() => {
     if (status === "complete") {
       document.title = `${getModeLabel(mode)} complete - Productivity OS`;
+    } else if (status === "overage") {
+      document.title = `+${formatTimeRemaining(overageSeconds)} overage - Productivity OS`;
     } else {
       document.title = `${formatTimeRemaining(remainingSeconds)} - ${getModeLabel(mode)}`;
     }
@@ -172,10 +241,10 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
       document.title = "Productivity OS";
       setFavicon(createFaviconHref("work"));
     };
-  }, [mode, remainingSeconds, status]);
+  }, [mode, remainingSeconds, status, overageSeconds]);
 
   useEffect(() => {
-    if (status === "complete") {
+    if (status === "complete" || status === "overage") {
       playCompletionChime();
     }
   }, [status]);
@@ -183,8 +252,10 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   const handleModeChange = (nextMode: TimerMode) => {
     completionEmittedRef.current = false;
     setMode(nextMode);
+    setBreakDurationSeconds(null);
     setRemainingSeconds(getModeDurationSeconds(nextMode));
     remainingSecondsRef.current = getModeDurationSeconds(nextMode);
+    setOverageSeconds(0);
     setStatus("idle");
     setLastCompletedMode(null);
   };
@@ -192,9 +263,8 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   const handleStart = () => {
     completionEmittedRef.current = false;
     if (remainingSeconds === 0) {
-      const resetSeconds = getModeDurationSeconds(mode);
-      setRemainingSeconds(resetSeconds);
-      remainingSecondsRef.current = resetSeconds;
+      setRemainingSeconds(modeTotalSeconds);
+      remainingSecondsRef.current = modeTotalSeconds;
     }
 
     setStatus("running");
@@ -206,10 +276,28 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   };
 
   const handleReset = () => {
-    const resetSeconds = getModeDurationSeconds(mode);
     completionEmittedRef.current = false;
+    setRemainingSeconds(modeTotalSeconds);
+    remainingSecondsRef.current = modeTotalSeconds;
+    setOverageSeconds(0);
+    setStatus("idle");
+    setLastCompletedMode(null);
+  };
+
+  const handleEndSession = () => {
+    const endedMode = modeRef.current;
+
+    onEndSession?.({
+      completedAt: new Date().toISOString(),
+      mode: endedMode,
+      overageSeconds,
+    });
+
+    completionEmittedRef.current = false;
+    const resetSeconds = getModeDurationSeconds("work");
     setRemainingSeconds(resetSeconds);
     remainingSecondsRef.current = resetSeconds;
+    setOverageSeconds(0);
     setStatus("idle");
     setLastCompletedMode(null);
   };
@@ -218,7 +306,10 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
   const dashOffset = circumference - (progress / 100) * circumference;
   const completionMode = lastCompletedMode ?? mode;
   const timerSurfaceColor =
-    status === "running" ? palette.backgroundActive : palette.backgroundInactive;
+    status === "running" || status === "overage" ? palette.backgroundActive : palette.backgroundInactive;
+  const displayTime = isOverage
+    ? `+${formatTimeRemaining(overageSeconds)}`
+    : formatTimeRemaining(remainingSeconds);
 
   return (
     <section
@@ -226,7 +317,7 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
       style={{
         backgroundColor: timerSurfaceColor,
         boxShadow:
-          status === "running"
+          status === "running" || status === "overage"
             ? `0 28px 90px ${palette.glow}`
             : "0 24px 60px rgba(15, 23, 42, 0.06)",
       }}
@@ -286,7 +377,7 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
                   className="text-6xl font-semibold tracking-[-0.08em] sm:text-8xl"
                   style={{ color: palette.progress }}
                 >
-                  {formatTimeRemaining(remainingSeconds)}
+                  {displayTime}
                 </p>
               </div>
             </div>
@@ -296,9 +387,11 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
             accentClassName="text-white hover:brightness-[0.96]"
             accentStyle={{ backgroundColor: palette.progress }}
             isRunning={status === "running"}
+            onEndSession={handleEndSession}
             onPause={handlePause}
             onReset={handleReset}
             onStart={handleStart}
+            overageMode={isOverage}
           />
         </div>
 
@@ -308,6 +401,15 @@ export function PomodoroTimer({ onComplete, onStateChange }: PomodoroTimerProps)
             style={{ backgroundColor: palette.glow }}
           >
             Completion event detected for the {getModeLabel(completionMode)} session.
+          </div>
+        ) : null}
+
+        {status === "overage" ? (
+          <div
+            className="w-full max-w-2xl rounded-full px-5 py-3 text-sm text-slate-700 ring-1 ring-slate-200/60"
+            style={{ backgroundColor: palette.glow }}
+          >
+            Work session complete — the timer is rolling forward. End the session to log it.
           </div>
         ) : null}
       </div>

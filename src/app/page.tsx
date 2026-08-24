@@ -3,22 +3,40 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 import { EmailAuthPanel, type EmailAuthPanelState } from "@/components/auth/EmailAuthPanel";
-import { LedgerEventList } from "@/components/ledger/LedgerEventList";
+import { LedgerEventList, type ActivityItem } from "@/components/ledger/LedgerEventList";
+import { MiniBlocks } from "@/components/overview/MiniBlocks";
 import { OverviewModule } from "@/components/overview/OverviewModule";
-import { PomodoroTimer, type TimerStatus } from "@/components/timer/PomodoroTimer";
+import { WeeklyOverview } from "@/components/overview/WeeklyOverview";
+import { PomodoroTimer, type SessionEndInfo, type TimerStatus } from "@/components/timer/PomodoroTimer";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
+import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { dedupeLedgerEvents } from "@/lib/ledger";
 import {
-  getRewardBalanceMinutes,
-  getRewardMinutesForWorkEvent,
+  computeScreenTimePenalty,
+  fetchBehaviorEvents,
+  getBehaviorExerciseMinutes,
+  getBehaviorTypeLabel,
+  hardDeleteBehaviorEvent,
+  INDULGENCE_PENALTY_MINUTES,
+  persistBehaviorEvent,
+  updateBehaviorEvent,
+} from "@/lib/behaviors";
+import { getModeDurationMinutes } from "@/lib/timer";
+import {
+  behaviorEventsToSettlementEvents,
+  computeSettlement,
+  getWorkDurationMinutes,
   isWeekendDate,
+  ledgerEventsToSettlementEvents,
   REWARD_BLOCK_MINUTES,
+  restMinutesForWorkMinutes,
+  rewardMinutesForWorkMinutes,
   WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK,
-  WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK,
   WEEKEND_REWARD_MULTIPLIER_LABEL,
-} from "@/lib/rewards";
+  WORK_BLOCK_WORK_MINUTES,
+} from "@/lib/economy";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   createTask,
@@ -27,7 +45,7 @@ import {
   fetchMostRecentAttributedTaskId,
   fetchTasksByIds,
 } from "@/lib/tasks";
-import { rewardPalette, timerPalette } from "@/lib/timerPalette";
+import { exercisePalette, penaltyPalette, rewardPalette, timerPalette } from "@/lib/timerPalette";
 import {
   AUTH_REQUIRED_MESSAGE,
   ensureWorkspaceUser,
@@ -35,19 +53,27 @@ import {
   fetchWorkspaceData,
   getManualWorkDefaultsFromLedgerEvent,
   getRewardSpendDefaultsFromLedgerEvent,
-  isDeletableLedgerEvent,
+  hardDeleteLedgerEvent,
+  hardResetWorkspace,
   isEditableLedgerEvent,
   persistCompletedWorkSession,
   persistManualWorkBlock,
   persistRewardSpend,
   persistWorkBlockAttributions,
-  softDeleteRewardSpendEvent,
-  softDeleteWorkEvent,
   updateManualWorkEntry,
   updateRewardSpendEntry,
 } from "@/lib/workspace";
 import { archiveTask, completeTask, removeTaskFromDailyFocus } from "@/lib/tasks";
-import type { DailyFocusItemWithTask, LedgerEvent, Task, TimerMode, TimerSession, WorkBlock } from "@/lib/types";
+import type {
+  BehaviorEvent,
+  BehaviorType,
+  DailyFocusItemWithTask,
+  LedgerEvent,
+  Task,
+  TimerMode,
+  TimerSession,
+  WorkBlock,
+} from "@/lib/types";
 
 type LocalLedgerState = {
   ledgerEvents: LedgerEvent[];
@@ -90,10 +116,28 @@ type RewardDialogMode =
   | { kind: "create" }
   | { kind: "edit"; ledgerEvent: LedgerEvent };
 
-type LedgerDeleteDialogState = {
-  event: LedgerEvent;
-  reason: string;
+type BehaviorDialogState = {
+  behaviorType: BehaviorType;
+  screenTimeMinutes: string;
+  screenTimeDate: string;
+  exerciseMinutes: string;
+  note: string;
 };
+
+const INITIAL_BEHAVIOR_DIALOG_STATE: BehaviorDialogState = {
+  behaviorType: "indulgence",
+  screenTimeMinutes: "",
+  screenTimeDate: "",
+  exerciseMinutes: "",
+  note: "",
+};
+
+type PendingSessionEnd = {
+  completedAt: string;
+  overageSeconds: number;
+};
+
+type BehaviorDialogMode = { kind: "create" } | { kind: "edit"; event: BehaviorEvent };
 
 function isToday(isoTimestamp: string) {
   const now = new Date();
@@ -135,10 +179,6 @@ function isThisWeek(isoTimestamp: string) {
   return date >= startOfWeek;
 }
 
-function getVisibleSquares(count: number, maxVisible = 12) {
-  return Array.from({ length: Math.min(count, maxVisible) });
-}
-
 function dedupeWorkBlocks(workBlocks: WorkBlock[]) {
   const seen = new Set<string>();
 
@@ -159,12 +199,19 @@ function dedupeWorkBlocks(workBlocks: WorkBlock[]) {
 }
 
 function formatRewardMinutes(totalMinutes: number) {
-  const absoluteMinutes = Math.abs(totalMinutes);
+  // Round up for display only; the underlying settlement keeps fractional minutes.
+  const absoluteMinutes = Math.ceil(Math.abs(totalMinutes));
   const hours = Math.floor(absoluteMinutes / 60);
   const minutes = absoluteMinutes % 60;
   const prefix = totalMinutes < 0 ? "-" : "";
 
   return `${prefix}${hours}:${minutes.toString().padStart(2, "0")}`;
+}
+
+function toDateInputValue(isoTimestamp: string) {
+  const date = new Date(isoTimestamp);
+  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
+  return offsetDate.toISOString().slice(0, 10);
 }
 
 function formatDurationLabel(hours: number, minutes: number) {
@@ -327,69 +374,6 @@ function AttributionFields({
   );
 }
 
-type BlockMeterProps = {
-  color: "reward" | "reward_negative" | "work";
-  count: number;
-  label: string;
-  maxVisible?: number;
-  partialCount?: number;
-  zeroLabel?: string;
-  valueLabel: string;
-};
-
-function BlockMeter({
-  color,
-  count,
-  label,
-  maxVisible = 12,
-  partialCount,
-  valueLabel,
-  zeroLabel = "No blocks yet",
-}: BlockMeterProps) {
-  const palette =
-    color === "work"
-      ? timerPalette.work.progress
-      : color === "reward"
-        ? rewardPalette.progress
-        : "#94a3b8";
-  const visibleSquares = getVisibleSquares(Math.ceil(partialCount ?? count), maxVisible);
-
-  return (
-    <div className="space-y-3">
-      {label ? <p className="text-sm text-slate-500">{label}</p> : null}
-      <div className="flex min-h-4 flex-wrap gap-[2px]">
-        {count === 0 ? (
-          <div className="text-xs text-slate-400">{zeroLabel}</div>
-        ) : (
-          visibleSquares.map((_, index) => {
-            const fillRatio = partialCount == null
-              ? 1
-              : Math.max(0, Math.min(1, partialCount - index));
-            const isGroupBoundary = index > 0 && index % 3 === 0;
-
-            return (
-              <span
-                key={`${label}-${index}`}
-                className={`relative h-[15px] w-[15px] overflow-hidden rounded-[2px] bg-slate-200/80 ${isGroupBoundary ? "ml-[9px]" : ""}`}
-              >
-                <span
-                  className="absolute inset-y-0 left-0 rounded-[2px]"
-                  style={{
-                    backgroundColor: palette,
-                    width: `${fillRatio * 100}%`,
-                  }}
-                />
-              </span>
-            );
-          })
-        )}
-        {count > maxVisible ? <span className="text-xs text-slate-500">+{count - maxVisible}</span> : null}
-      </div>
-      {valueLabel ? <p className="text-sm font-semibold text-slate-900">{valueLabel}</p> : null}
-    </div>
-  );
-}
-
 export default function HomePage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [localLedgerState, setLocalLedgerState] = useState(INITIAL_STATE);
@@ -425,7 +409,15 @@ export default function HomePage() {
   const [rewardMinutes, setRewardMinutes] = useState("0");
   const [rewardDayOffset, setRewardDayOffset] = useState(0);
   const [rewardNote, setRewardNote] = useState("");
-  const [ledgerDeleteDialogState, setLedgerDeleteDialogState] = useState<LedgerDeleteDialogState | null>(null);
+  const [ledgerDeleteDialogState, setLedgerDeleteDialogState] = useState<LedgerEvent | null>(null);
+  const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
+  const [behaviorEvents, setBehaviorEvents] = useState<BehaviorEvent[]>([]);
+  const [isBehaviorDialogOpen, setIsBehaviorDialogOpen] = useState(false);
+  const [behaviorDialogState, setBehaviorDialogState] = useState<BehaviorDialogState>(INITIAL_BEHAVIOR_DIALOG_STATE);
+  const [behaviorDialogMode, setBehaviorDialogMode] = useState<BehaviorDialogMode>({ kind: "create" });
+  const [behaviorDeleteTarget, setBehaviorDeleteTarget] = useState<BehaviorEvent | null>(null);
+  const [breakRequest, setBreakRequest] = useState<{ token: number; minutes: number } | null>(null);
+  const [pendingSessionEnd, setPendingSessionEnd] = useState<PendingSessionEnd | null>(null);
   const handledCompletionKeysRef = useRef(new Set<string>());
 
   const dedupedWorkBlocks = useMemo(
@@ -438,29 +430,36 @@ export default function HomePage() {
     [localLedgerState.ledgerEvents],
   );
 
-  const todaysWorkBlocks = useMemo(
-    () => dedupedWorkBlocks.filter((workBlock) => isToday(workBlock.earned_at)),
+  const todaysWorkMinutes = useMemo(
+    () =>
+      dedupedWorkBlocks
+        .filter((workBlock) => isToday(workBlock.earned_at))
+        .reduce((total, workBlock) => total + workBlock.duration_minutes, 0),
     [dedupedWorkBlocks],
   );
 
-  const currentWorkBalance = useMemo(
-    () =>
-      dedupedLedgerEvents.reduce(
-        (total, event) => total + event.delta_work_blocks,
-        0,
-      ),
-    [dedupedLedgerEvents],
+  const exerciseMinutes = useMemo(
+    () => getBehaviorExerciseMinutes(behaviorEvents),
+    [behaviorEvents],
   );
 
-  const currentRewardMinutes = useMemo(
-    () => getRewardBalanceMinutes(dedupedLedgerEvents),
-    [dedupedLedgerEvents],
-  );
+  const settlement = useMemo(() => {
+    const events = [
+      ...ledgerEventsToSettlementEvents(dedupedLedgerEvents),
+      ...behaviorEventsToSettlementEvents(behaviorEvents),
+    ];
 
-  const currentRewardBalance = useMemo(
-    () => Math.abs(currentRewardMinutes) / REWARD_BLOCK_MINUTES,
-    [currentRewardMinutes],
-  );
+    return computeSettlement(events);
+  }, [dedupedLedgerEvents, behaviorEvents]);
+
+  const rewardDisplay = useMemo(() => {
+    const exerciseVisibleMinutes = Math.min(exerciseMinutes, settlement.positiveMinutes);
+
+    return {
+      exerciseVisibleMinutes,
+      positiveWorkMinutes: settlement.positiveMinutes - exerciseVisibleMinutes,
+    };
+  }, [exerciseMinutes, settlement.positiveMinutes]);
 
   const isWeekendBonusActive = useMemo(
     () => isWeekendDate(new Date().toISOString()),
@@ -472,17 +471,55 @@ export default function HomePage() {
     [dedupedWorkBlocks],
   );
 
-  const weeklyRewardMinutesEarned = useMemo(
+  const weeklyRewardWorkMinutes = useMemo(
     () =>
       dedupedLedgerEvents
         .filter((event) => event.event_type === "work_earned" && isThisWeek(event.created_at))
-        .reduce((total, event) => total + getRewardMinutesForWorkEvent(event), 0),
+        .reduce(
+          (total, event) =>
+            total +
+            rewardMinutesForWorkMinutes(
+              getWorkDurationMinutes(event),
+              isWeekendDate(event.created_at),
+            ),
+          0,
+        ),
     [dedupedLedgerEvents],
   );
 
-  const recentLedgerEvents = useMemo(
-    () => dedupedLedgerEvents.slice(0, 5),
-    [dedupedLedgerEvents],
+  const weeklyWorkMinutes = useMemo(
+    () => weeklyWorkBlocks.reduce((total, workBlock) => total + workBlock.duration_minutes, 0),
+    [weeklyWorkBlocks],
+  );
+
+  const weeklyExerciseMinutes = useMemo(
+    () =>
+      behaviorEvents
+        .filter((event) => event.behavior_type === "exercise" && isThisWeek(event.occurred_at))
+        .reduce((total, event) => total + (event.duration_minutes ?? 0), 0),
+    [behaviorEvents],
+  );
+
+  const weeklyPenaltyMinutes = useMemo(
+    () =>
+      behaviorEvents
+        .filter((event) => event.behavior_type !== "exercise" && isThisWeek(event.occurred_at))
+        .reduce((total, event) => total + (event.penalty_minutes ?? 0), 0),
+    [behaviorEvents],
+  );
+
+  const recentActivityItems = useMemo(
+    () => {
+      const ledgerItems = dedupedLedgerEvents.map((event) => ({ kind: "ledger" as const, event }));
+      const behaviorItems = behaviorEvents.map((event) => ({ kind: "behavior" as const, event }));
+      const timestampOf = (item: ActivityItem) =>
+        item.kind === "ledger" ? item.event.created_at : item.event.occurred_at;
+
+      return [...ledgerItems, ...behaviorItems]
+        .sort((left, right) => timestampOf(right).localeCompare(timestampOf(left)))
+        .slice(0, 8);
+    },
+    [dedupedLedgerEvents, behaviorEvents],
   );
 
   const visibleDailyFocusItems = useMemo(
@@ -556,6 +593,17 @@ export default function HomePage() {
             setDailyFocusNotice(error instanceof Error ? error.message : "Could not load daily focus items.");
           }
         }
+        try {
+          const behaviorEventRows = await fetchBehaviorEvents(supabase, user.id);
+
+          if (!cancelled) {
+            setBehaviorEvents(behaviorEventRows);
+          }
+        } catch {
+          if (!cancelled) {
+            setBehaviorEvents([]);
+          }
+        }
         setPersistenceState({
           kind: "ready",
           message: "Workspace connected",
@@ -604,6 +652,7 @@ export default function HomePage() {
         setLocalLedgerState(INITIAL_STATE);
         setDailyFocusItems([]);
         setDailyFocusNotice(null);
+        setBehaviorEvents([]);
         setPersistenceState({
           kind: "auth_required",
           message: AUTH_REQUIRED_MESSAGE,
@@ -633,6 +682,13 @@ export default function HomePage() {
           } catch (error) {
             setDailyFocusItems([]);
             setDailyFocusNotice(error instanceof Error ? error.message : "Could not load daily focus items.");
+          }
+
+          try {
+            const behaviorEventRows = await fetchBehaviorEvents(supabase, user.id);
+            setBehaviorEvents(behaviorEventRows);
+          } catch {
+            setBehaviorEvents([]);
           }
 
           setPersistenceState({
@@ -675,6 +731,19 @@ export default function HomePage() {
 
     const workspaceData = await fetchWorkspaceData(supabase, userId);
     setLocalLedgerState(workspaceData);
+  };
+
+  const reloadBehaviorEvents = async (userId: string) => {
+    if (!supabase) {
+      return;
+    }
+
+    try {
+      const events = await fetchBehaviorEvents(supabase, userId);
+      setBehaviorEvents(events);
+    } catch {
+      setBehaviorEvents([]);
+    }
   };
 
   const getRewardDayOffsetFromTimestamp = (isoTimestamp: string) => {
@@ -863,6 +932,73 @@ export default function HomePage() {
     }
   };
 
+  const handleEndSession = (session: SessionEndInfo) => {
+    setPendingSessionEnd({
+      completedAt: session.completedAt,
+      overageSeconds: session.overageSeconds,
+    });
+  };
+
+  const handleConfirmSessionLog = async (uninterrupted: boolean) => {
+    if (!supabase || !workspaceUserId || !pendingSessionEnd) {
+      return;
+    }
+
+    const plannedMinutes = getModeDurationMinutes("work");
+    const totalMinutes = uninterrupted
+      ? Math.max(
+          plannedMinutes,
+          Math.round((plannedMinutes * 60 + pendingSessionEnd.overageSeconds) / 60),
+        )
+      : plannedMinutes;
+
+    setPersistenceState({
+      kind: "saving",
+      message: "Saving completed work session...",
+    });
+
+    try {
+      const artifacts = await persistCompletedWorkSession(supabase, {
+        completedAt: pendingSessionEnd.completedAt,
+        durationMinutes: totalMinutes,
+        mode: "work",
+        userId: workspaceUserId,
+      });
+
+      if (!artifacts) {
+        setPendingSessionEnd(null);
+        setPersistenceState({ kind: "ready", message: "Workspace connected" });
+        return;
+      }
+
+      setLocalLedgerState((current) => ({
+        ledgerEvents: current.ledgerEvents.some((event) => event.id === artifacts.ledgerEvent.id)
+          ? current.ledgerEvents
+          : [artifacts.ledgerEvent, ...current.ledgerEvents],
+        timerSessions: current.timerSessions.some((session) => session.id === artifacts.timerSession.id)
+          ? current.timerSessions
+          : [artifacts.timerSession, ...current.timerSessions],
+        workBlocks: current.workBlocks.some((workBlock) => workBlock.id === artifacts.workBlock.id)
+          ? current.workBlocks
+          : [artifacts.workBlock, ...current.workBlocks],
+      }));
+
+      setPendingSessionEnd(null);
+      if (uninterrupted) {
+        setBreakRequest({ token: Date.now(), minutes: restMinutesForWorkMinutes(totalMinutes) });
+      }
+      await openAttributionDialog({
+        ledgerEvent: artifacts.ledgerEvent,
+        workBlock: artifacts.workBlock,
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not save the completed work session.",
+      });
+    }
+  };
+
   const handleManualWorkAdd = async () => {
     const durationMinutes = Number.parseInt(manualWorkMinutes, 10);
 
@@ -1033,6 +1169,131 @@ export default function HomePage() {
       setPersistenceState({
         kind: "error",
         message: error instanceof Error ? error.message : "Could not save the reward spend.",
+      });
+    }
+  };
+
+  const handleSaveBehaviorEvent = async () => {
+    if (!supabase || !workspaceUserId) {
+      return;
+    }
+
+    let durationMinutes: number | null = null;
+    let occurredAt: string | undefined;
+
+    if (behaviorDialogState.behaviorType === "screen_time") {
+      const screenMinutes = Number.parseInt(behaviorDialogState.screenTimeMinutes, 10);
+
+      if (!Number.isFinite(screenMinutes) || screenMinutes <= 0) {
+        setPersistenceState({
+          kind: "error",
+          message: "Enter your total screen time for the day in minutes.",
+        });
+        return;
+      }
+
+      durationMinutes = screenMinutes;
+
+      if (behaviorDialogState.screenTimeDate) {
+        occurredAt = new Date(`${behaviorDialogState.screenTimeDate}T12:00:00`).toISOString();
+      }
+    } else if (behaviorDialogState.behaviorType === "exercise") {
+      const workoutMinutes = Number.parseInt(behaviorDialogState.exerciseMinutes, 10);
+
+      if (!Number.isFinite(workoutMinutes) || workoutMinutes <= 0) {
+        setPersistenceState({
+          kind: "error",
+          message: "Enter your workout length in minutes.",
+        });
+        return;
+      }
+
+      durationMinutes = workoutMinutes;
+    }
+
+    setPersistenceState({
+      kind: "saving",
+      message: "Saving behavior entry...",
+    });
+
+    try {
+      if (behaviorDialogMode.kind === "edit") {
+        await updateBehaviorEvent(supabase, {
+          eventId: behaviorDialogMode.event.id,
+          behaviorType: behaviorDialogState.behaviorType,
+          durationMinutes,
+          note: behaviorDialogState.note,
+          occurredAt,
+          userId: workspaceUserId,
+        });
+      } else {
+        await persistBehaviorEvent(supabase, {
+          behaviorType: behaviorDialogState.behaviorType,
+          durationMinutes,
+          note: behaviorDialogState.note,
+          occurredAt,
+          userId: workspaceUserId,
+        });
+      }
+
+      await reloadBehaviorEvents(workspaceUserId);
+      setIsBehaviorDialogOpen(false);
+      setBehaviorDialogState(INITIAL_BEHAVIOR_DIALOG_STATE);
+      setBehaviorDialogMode({ kind: "create" });
+      setPersistenceState({
+        kind: "saved",
+        message: behaviorDialogMode.kind === "edit" ? "Behavior entry updated" : "Behavior entry saved",
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not save the behavior entry.",
+      });
+    }
+  };
+
+  const handleRequestEditBehavior = (event: BehaviorEvent) => {
+    setBehaviorDialogMode({ kind: "edit", event });
+    setBehaviorDialogState({
+      behaviorType: event.behavior_type,
+      screenTimeMinutes:
+        event.behavior_type === "screen_time" ? String(event.duration_minutes ?? "") : "",
+      screenTimeDate: event.behavior_type === "screen_time" ? toDateInputValue(event.occurred_at) : "",
+      exerciseMinutes: event.behavior_type === "exercise" ? String(event.duration_minutes ?? "") : "",
+      note: event.note ?? "",
+    });
+    setIsBehaviorDialogOpen(true);
+  };
+
+  const handleRequestDeleteBehavior = (event: BehaviorEvent) => {
+    setBehaviorDeleteTarget(event);
+  };
+
+  const handleConfirmDeleteBehavior = async () => {
+    if (!supabase || !workspaceUserId || !behaviorDeleteTarget) {
+      return;
+    }
+
+    setPersistenceState({
+      kind: "saving",
+      message: "Deleting behavior entry...",
+    });
+
+    try {
+      await hardDeleteBehaviorEvent(supabase, {
+        eventId: behaviorDeleteTarget.id,
+        userId: workspaceUserId,
+      });
+      await reloadBehaviorEvents(workspaceUserId);
+      setBehaviorDeleteTarget(null);
+      setPersistenceState({
+        kind: "saved",
+        message: "Behavior entry deleted",
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not delete the behavior entry.",
       });
     }
   };
@@ -1355,24 +1616,11 @@ export default function HomePage() {
   };
 
   const handleRequestLedgerDelete = (event: LedgerEvent) => {
-    setLedgerDeleteDialogState({
-      event,
-      reason: "",
-    });
+    setLedgerDeleteDialogState(event);
   };
 
   const handleConfirmLedgerDelete = async () => {
     if (!supabase || !workspaceUserId || !ledgerDeleteDialogState) {
-      return;
-    }
-
-    const trimmedReason = ledgerDeleteDialogState.reason.trim();
-
-    if (!trimmedReason) {
-      setPersistenceState({
-        kind: "error",
-        message: "Add a short deletion reason before removing a ledger event.",
-      });
       return;
     }
 
@@ -1382,22 +1630,10 @@ export default function HomePage() {
     });
 
     try {
-      if (ledgerDeleteDialogState.event.event_type === "reward_spent") {
-        await softDeleteRewardSpendEvent(supabase, {
-          actorLabel: "Recent activity",
-          deletionReason: trimmedReason,
-          ledgerEvent: ledgerDeleteDialogState.event,
-          userId: workspaceUserId,
-        });
-      } else {
-        await softDeleteWorkEvent(supabase, {
-          actorLabel: "Recent activity",
-          deletionReason: trimmedReason,
-          ledgerEvent: ledgerDeleteDialogState.event,
-          userId: workspaceUserId,
-        });
-      }
-
+      await hardDeleteLedgerEvent(supabase, {
+        ledgerEvent: ledgerDeleteDialogState,
+        userId: workspaceUserId,
+      });
       await reloadWorkspaceData(workspaceUserId);
       await reloadDailyFocusItems(workspaceUserId);
       setLedgerDeleteDialogState(null);
@@ -1409,6 +1645,34 @@ export default function HomePage() {
       setPersistenceState({
         kind: "error",
         message: error instanceof Error ? error.message : "Could not delete the ledger event.",
+      });
+    }
+  };
+
+  const handleConfirmReset = async () => {
+    if (!supabase || !workspaceUserId) {
+      return;
+    }
+
+    setPersistenceState({
+      kind: "saving",
+      message: "Resetting workspace...",
+    });
+
+    try {
+      await hardResetWorkspace(supabase, { userId: workspaceUserId });
+      await reloadWorkspaceData(workspaceUserId);
+      await reloadDailyFocusItems(workspaceUserId);
+      await reloadBehaviorEvents(workspaceUserId);
+      setIsResetDialogOpen(false);
+      setPersistenceState({
+        kind: "saved",
+        message: "Workspace reset",
+      });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not reset the workspace.",
       });
     }
   };
@@ -1491,28 +1755,36 @@ export default function HomePage() {
             <Badge className="normal-case tracking-normal" tone="neutral">
               {persistenceState.message}
             </Badge>
-            <details className="group relative">
-              <summary className="cursor-pointer list-none text-xs uppercase tracking-[0.18em] text-slate-400 transition hover:text-slate-600">
-                Settings
-              </summary>
-              <div className="absolute right-0 top-6 z-20 min-w-40 rounded-2xl border border-slate-200/90 bg-[var(--surface)]/95 p-2 shadow-[0_16px_32px_rgba(15,23,42,0.12)]">
-                <Link
-                  className="block rounded-xl px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
-                  href="/settings/tasks"
+            <PopoverMenu
+              buttonClassName="text-xs uppercase tracking-[0.18em] text-slate-400 hover:text-slate-600"
+              label="Settings"
+              menuClassName="min-w-40 rounded-2xl bg-[var(--surface)]/95 shadow-[0_16px_32px_rgba(15,23,42,0.12)]"
+            >
+              <Link
+                className="block rounded-xl px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
+                href="/settings/tasks"
+              >
+                Task vault
+              </Link>
+              {workspaceUserId ? (
+                <button
+                  className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
+                  onClick={() => setIsResetDialogOpen(true)}
+                  type="button"
                 >
-                  Task vault
-                </Link>
-                {workspaceUserId ? (
-                  <button
-                    className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
-                    onClick={() => void handleSignOut()}
-                    type="button"
-                  >
-                    Sign out
-                  </button>
-                ) : null}
-              </div>
-            </details>
+                  Reset workspace
+                </button>
+              ) : null}
+              {workspaceUserId ? (
+                <button
+                  className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
+                  onClick={() => void handleSignOut()}
+                  type="button"
+                >
+                  Sign out
+                </button>
+              ) : null}
+            </PopoverMenu>
           </div>
         </header>
 
@@ -1530,7 +1802,9 @@ export default function HomePage() {
         ) : (
           <>
             <PomodoroTimer
+              breakRequest={breakRequest}
               onComplete={handleTimerComplete}
+              onEndSession={handleEndSession}
               onStateChange={setTimerVisualState}
             />
 
@@ -1615,18 +1889,20 @@ export default function HomePage() {
                   </Button>
                 }
                 body={
-                  <BlockMeter
-                    color="work"
-                    count={todaysWorkBlocks.length}
-                    label=""
-                    valueLabel=""
-                    zeroLabel="No completed blocks yet"
-                  />
+                  todaysWorkMinutes > 0 ? (
+                    <MiniBlocks
+                      color={timerPalette.work.progress}
+                      minutes={todaysWorkMinutes}
+                      minutesPerBlock={WORK_BLOCK_WORK_MINUTES}
+                    />
+                  ) : (
+                    <div className="text-xs text-slate-400">No completed blocks yet</div>
+                  )
                 }
                 className="md:pr-8"
                 footer={
                   <p className="text-sm font-medium text-slate-500">
-                    {todaysWorkBlocks.length} block{todaysWorkBlocks.length === 1 ? "" : "s"}
+                    {formatRewardMinutes(todaysWorkMinutes)}
                   </p>
                 }
                 ruleStyle={{ backgroundColor: timerPalette.work.progress }}
@@ -1635,9 +1911,14 @@ export default function HomePage() {
 
               <OverviewModule
                 action={
-                  <Button onClick={() => setIsRewardDialogOpen(true)} size="inline" variant="text">
-                    Spend reward
-                  </Button>
+                  <div className="flex flex-col items-start gap-1">
+                    <Button onClick={() => setIsRewardDialogOpen(true)} size="inline" variant="text">
+                      Spend reward
+                    </Button>
+                    <Button onClick={() => setIsBehaviorDialogOpen(true)} size="inline" variant="text">
+                      Behavior tracking
+                    </Button>
+                  </div>
                 }
                 badge={
                   isWeekendBonusActive ? (
@@ -1647,21 +1928,48 @@ export default function HomePage() {
                   ) : undefined
                 }
                 body={
-                  <BlockMeter
-                    color={currentRewardMinutes < 0 ? "reward_negative" : "reward"}
-                    count={Math.ceil(currentRewardBalance)}
-                    label=""
-                    partialCount={currentRewardBalance}
-                    valueLabel=""
-                    zeroLabel="No reward time yet"
-                  />
+                  settlement.positiveMinutes > 0 ? (
+                    <div className="flex flex-wrap items-center gap-3">
+                      <MiniBlocks
+                        color={rewardPalette.progress}
+                        minutes={rewardDisplay.positiveWorkMinutes}
+                        minutesPerBlock={REWARD_BLOCK_MINUTES}
+                      />
+                      <MiniBlocks
+                        color={exercisePalette.progress}
+                        minutes={rewardDisplay.exerciseVisibleMinutes}
+                        minutesPerBlock={REWARD_BLOCK_MINUTES}
+                      />
+                    </div>
+                  ) : settlement.penaltyRemainingMinutes > 0 || settlement.debtMinutes > 0 ? (
+                    <div className="flex flex-wrap items-center gap-3">
+                      {settlement.penaltyRemainingMinutes > 0 ? (
+                        <MiniBlocks
+                          color={penaltyPalette.progress}
+                          minutes={settlement.penaltyRemainingMinutes}
+                          minutesPerBlock={REWARD_BLOCK_MINUTES}
+                        />
+                      ) : null}
+                      {settlement.debtMinutes > 0 ? (
+                        <MiniBlocks
+                          color={rewardPalette.progress}
+                          fillMinutes={settlement.overdrawFillMinutes}
+                          minutes={settlement.overdrawFrameMinutes}
+                          minutesPerBlock={REWARD_BLOCK_MINUTES}
+                          variant="outline"
+                        />
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-slate-400">No reward time yet</div>
+                  )
                 }
                 className="md:border-l md:border-slate-300/80 md:pl-8"
                 footer={
                   <p className="text-sm font-medium text-slate-500">
-                    {currentRewardMinutes < 0
-                      ? `${formatRewardMinutes(currentRewardMinutes)} behind`
-                      : `${formatRewardMinutes(currentRewardMinutes)} available`}
+                    {settlement.netMinutes < 0
+                      ? `${formatRewardMinutes(settlement.netMinutes)} behind`
+                      : `${formatRewardMinutes(settlement.netMinutes)} available`}
                   </p>
                 }
                 ruleStyle={{ backgroundColor: rewardPalette.progress }}
@@ -1673,27 +1981,12 @@ export default function HomePage() {
           <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
             <OverviewModule
               body={
-                <BlockMeter
-                  color="work"
-                  count={weeklyWorkBlocks.length}
-                  label=""
-                  valueLabel=""
-                  zeroLabel="No work blocks this week"
+                <WeeklyOverview
+                  exerciseMinutes={weeklyExerciseMinutes}
+                  penaltyMinutes={weeklyPenaltyMinutes}
+                  rewardWorkMinutes={weeklyRewardWorkMinutes}
+                  workMinutes={weeklyWorkMinutes}
                 />
-              }
-              footer={
-                <div className="grid gap-4 border-t border-slate-200/80 pt-4">
-                  <div className="space-y-1">
-                    <p className="text-sm text-slate-500">Reward earned</p>
-                    <p className="text-sm font-medium text-slate-900">{formatRewardMinutes(weeklyRewardMinutesEarned)}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm text-slate-500">Work balance</p>
-                    <p className="text-sm font-medium text-slate-900">
-                      {currentWorkBalance} work block{Math.abs(currentWorkBalance) === 1 ? "" : "s"}
-                    </p>
-                  </div>
-                </div>
               }
               title="Weekly overview"
             />
@@ -1704,10 +1997,11 @@ export default function HomePage() {
               body={
                 <LedgerEventList
                   emptyMessage="Finish a work timer to create your first saved ledger event."
-                  events={recentLedgerEvents}
+                  items={recentActivityItems}
                   onRequestDelete={handleRequestLedgerDelete}
                   onRequestEdit={handleRequestLedgerEdit}
-                  showDeleteAction={isDeletableLedgerEvent}
+                  onRequestDeleteBehavior={handleRequestDeleteBehavior}
+                  onRequestEditBehavior={handleRequestEditBehavior}
                   showEditAction={isEditableLedgerEvent}
                 />
               }
@@ -1897,36 +2191,192 @@ export default function HomePage() {
       <Dialog
         onClose={() => setLedgerDeleteDialogState(null)}
         open={Boolean(ledgerDeleteDialogState)}
-        title="Delete ledger event"
+        title="Delete ledger event?"
       >
         {ledgerDeleteDialogState ? (
           <div className="space-y-5">
             <p className="text-sm leading-6 text-slate-600">
-              This will hide the event from the active ledger and preserve a deletion note for future traceability.
+              Are you sure? This will permanently remove this event and its linked records from your ledger.
             </p>
             <div className="rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
               <p className="text-sm font-medium text-slate-950">
-                {ledgerDeleteDialogState.event.event_type === "reward_spent" ? "Reward spend" : "Work event"}
+                {ledgerDeleteDialogState.event_type === "reward_spent" ? "Reward spend" : "Work event"}
               </p>
               <p className="mt-1 text-sm text-slate-600">
-                {formatTimestamp(ledgerDeleteDialogState.event.created_at)} via {ledgerDeleteDialogState.event.source.replaceAll("_", " ")}
+                {formatTimestamp(ledgerDeleteDialogState.created_at)} via {ledgerDeleteDialogState.source.replaceAll("_", " ")}
               </p>
             </div>
-            <ActionField
-              label="Deletion reason"
-              onChange={(event) =>
-                setLedgerDeleteDialogState((current) =>
-                  current ? { ...current, reason: event.target.value } : current
-                )}
-              placeholder="Why should this event be removed?"
-              value={ledgerDeleteDialogState.reason}
-            />
             <div className="flex justify-end gap-3">
               <Button onClick={() => setLedgerDeleteDialogState(null)} variant="text">
                 Cancel
               </Button>
               <Button onClick={handleConfirmLedgerDelete} variant="secondary">
                 Delete event
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
+
+      <Dialog
+        onClose={() => setIsResetDialogOpen(false)}
+        open={isResetDialogOpen}
+        title="Reset workspace"
+      >
+        <div className="space-y-5">
+          <p className="text-sm leading-6 text-slate-600">
+            This will permanently zero out today&apos;s work, the entire reward balance, the weekly overview, and clear
+            the recent activity ledger. This cannot be undone.
+          </p>
+          <div className="rounded-[0.8rem] border border-rose-200 bg-rose-50 px-4 py-3">
+            <p className="text-sm font-medium text-rose-700">Hard reset — this action is irreversible.</p>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button onClick={() => setIsResetDialogOpen(false)} variant="text">
+              Cancel
+            </Button>
+            <Button onClick={handleConfirmReset} variant="secondary">
+              Reset workspace
+            </Button>
+          </div>
+        </div>
+      </Dialog>
+
+      <Dialog
+        onClose={() => {
+          setIsBehaviorDialogOpen(false);
+          setBehaviorDialogState(INITIAL_BEHAVIOR_DIALOG_STATE);
+          setBehaviorDialogMode({ kind: "create" });
+        }}
+        open={isBehaviorDialogOpen}
+        title={behaviorDialogMode.kind === "edit" ? "Edit behavior entry" : "Behavior tracking"}
+      >
+        <div className="space-y-5">
+          <div className="grid gap-2 sm:grid-cols-3">
+            {(["indulgence", "screen_time", "exercise"] as BehaviorType[]).map((type) => {
+              const selected = behaviorDialogState.behaviorType === type;
+
+              return (
+                <Button
+                  key={type}
+                  aria-pressed={selected}
+                  onClick={() =>
+                    setBehaviorDialogState((current) => ({ ...current, behaviorType: type }))
+                  }
+                  variant={selected ? "primary" : "secondary"}
+                >
+                  {getBehaviorTypeLabel(type)}
+                </Button>
+              );
+            })}
+          </div>
+
+          {behaviorDialogState.behaviorType === "indulgence" ? (
+            <div className="rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
+              <p className="text-sm text-slate-600">
+                Records a flat{" "}
+                <span className="font-medium text-slate-900">{INDULGENCE_PENALTY_MINUTES} minute</span> reward
+                deficit.
+              </p>
+            </div>
+          ) : null}
+
+          {behaviorDialogState.behaviorType === "screen_time" ? (
+            <div className="space-y-3">
+              <ActionField
+                label="Day"
+                onChange={(event) =>
+                  setBehaviorDialogState((current) => ({ ...current, screenTimeDate: event.target.value }))
+                }
+                type="date"
+                value={behaviorDialogState.screenTimeDate}
+              />
+              <ActionField
+                label="Total screen time (minutes)"
+                inputMode="numeric"
+                min="0"
+                onChange={(event) =>
+                  setBehaviorDialogState((current) => ({ ...current, screenTimeMinutes: event.target.value }))
+                }
+                type="number"
+                value={behaviorDialogState.screenTimeMinutes}
+              />
+              {behaviorDialogState.screenTimeMinutes ? (
+                <p className="text-sm text-slate-500">
+                  Penalty:{" "}
+                  {computeScreenTimePenalty(Number.parseInt(behaviorDialogState.screenTimeMinutes, 10) || 0)}{" "}
+                  minutes
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {behaviorDialogState.behaviorType === "exercise" ? (
+            <ActionField
+              label="Workout length (minutes)"
+              inputMode="numeric"
+              min="1"
+              onChange={(event) =>
+                setBehaviorDialogState((current) => ({ ...current, exerciseMinutes: event.target.value }))
+              }
+              type="number"
+              value={behaviorDialogState.exerciseMinutes}
+            />
+          ) : null}
+
+          <ActionField
+            label="Note"
+            onChange={(event) =>
+              setBehaviorDialogState((current) => ({ ...current, note: event.target.value }))
+            }
+            placeholder="Optional note"
+            value={behaviorDialogState.note}
+          />
+
+          <Button className="w-full" onClick={handleSaveBehaviorEvent} variant="secondary">
+            {behaviorDialogMode.kind === "edit" ? "Save changes" : "Save behavior entry"}
+          </Button>
+        </div>
+      </Dialog>
+
+      <Dialog
+        onClose={() => setPendingSessionEnd(null)}
+        open={Boolean(pendingSessionEnd)}
+        title="Log this session"
+      >
+        {pendingSessionEnd ? (
+          <div className="space-y-5">
+            <p className="text-sm leading-6 text-slate-600">
+              Did this session represent uninterrupted work?
+            </p>
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <Button onClick={() => handleConfirmSessionLog(false)} variant="text">
+                No — log a single work block
+              </Button>
+              <Button onClick={() => handleConfirmSessionLog(true)} variant="secondary">
+                Yes — log the full session
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
+
+      <Dialog
+        onClose={() => setBehaviorDeleteTarget(null)}
+        open={Boolean(behaviorDeleteTarget)}
+        title="Delete behavior entry?"
+      >
+        {behaviorDeleteTarget ? (
+          <div className="space-y-5">
+            <p className="text-sm leading-6 text-slate-600">
+              Are you sure? This will permanently remove this behavior entry.
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button onClick={() => setBehaviorDeleteTarget(null)} variant="text">
+                Cancel
+              </Button>
+              <Button onClick={handleConfirmDeleteBehavior} variant="secondary">
+                Delete entry
               </Button>
             </div>
           </div>

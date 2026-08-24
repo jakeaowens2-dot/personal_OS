@@ -40,3 +40,20 @@ export const rewardPalette = {
   backgroundInactive: "#F3F8FF",
   glow: "#E3EEFF",
 } as const;
+
+// Behavior tracking accents: exercise (positive) reads as periwinkle, penalties as purple.
+export const exercisePalette = {
+  progress: "#7B8FD8",
+} as const;
+
+export const penaltyPalette = {
+  progress: "#7C3AED",
+  border: "#7C3AED",
+} as const;
+
+// "Destroyed reward blocks": greyed-out blue with a purple border + purple X overlay.
+export const destroyedRewardPalette = {
+  fill: "#C7D2E8",
+  border: "#7C3AED",
+  mark: "#7C3AED",
+} as const;

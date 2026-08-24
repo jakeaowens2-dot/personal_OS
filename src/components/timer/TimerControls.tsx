@@ -7,31 +7,41 @@ type TimerControlsProps = {
   accentClassName?: string;
   accentStyle?: CSSProperties;
   isRunning: boolean;
+  onEndSession?: () => void;
   onPause: () => void;
   onReset: () => void;
   onStart: () => void;
+  overageMode?: boolean;
 };
 
 export function TimerControls({
   accentClassName,
   accentStyle,
   isRunning,
+  onEndSession,
   onPause,
   onReset,
   onStart,
+  overageMode = false,
 }: TimerControlsProps) {
   return (
     <div className="flex flex-wrap items-center justify-center gap-3">
-      <Button className={accentClassName} onClick={isRunning ? onPause : onStart} style={accentStyle}>
-        {isRunning ? "Pause timer" : "Start timer"}
-      </Button>
       <Button
-        className="border-slate-300/80 bg-white/70 hover:bg-white"
-        onClick={onReset}
-        variant="secondary"
+        className={accentClassName}
+        onClick={overageMode ? onEndSession : isRunning ? onPause : onStart}
+        style={accentStyle}
       >
-        Reset
+        {overageMode ? "End session" : isRunning ? "Pause timer" : "Start timer"}
       </Button>
+      {!overageMode ? (
+        <Button
+          className="border-slate-300/80 bg-white/70 hover:bg-white"
+          onClick={onReset}
+          variant="secondary"
+        >
+          Reset
+        </Button>
+      ) : null}
     </div>
   );
 }

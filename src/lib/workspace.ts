@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createLocalCompletionArtifacts } from "@/lib/ledger";
+import { workBlockDeltaForDuration } from "@/lib/economy";
 import type {
   LedgerEvent,
   RewardRedemption,
@@ -18,6 +19,7 @@ export type WorkspaceData = {
 
 type PersistCompletionInput = {
   completedAt: string;
+  durationMinutes?: number;
   mode: TimerMode;
   userId: string;
 };
@@ -180,10 +182,11 @@ export async function fetchWorkspaceData(supabase: SupabaseClient, userId: strin
 
 export async function persistCompletedWorkSession(
   supabase: SupabaseClient,
-  { completedAt, mode, userId }: PersistCompletionInput,
+  { completedAt, durationMinutes, mode, userId }: PersistCompletionInput,
 ) {
   const artifacts = createLocalCompletionArtifacts({
     completedAt: new Date(completedAt),
+    durationMinutes,
     mode,
     userId,
   });
@@ -255,7 +258,7 @@ export async function persistManualWorkBlock(
     id: crypto.randomUUID(),
     user_id: userId,
     event_type: "work_earned",
-    delta_work_blocks: 1,
+    delta_work_blocks: workBlockDeltaForDuration(durationMinutes),
     delta_reward_blocks: 0,
     source: "manual_entry",
     metadata: {
@@ -697,6 +700,138 @@ export async function softDeleteWorkEvent(
 
   if (ledgerEventError) {
     throw new Error(toErrorMessage(ledgerEventError, "Could not delete the ledger event."));
+  }
+}
+
+export async function hardDeleteWorkEvent(
+  supabase: SupabaseClient,
+  { ledgerEvent, userId }: { ledgerEvent: LedgerEvent; userId: string },
+) {
+  const workBlockId = getMetadataString(ledgerEvent.metadata, "work_block_id");
+  const timerSessionId = getMetadataString(ledgerEvent.metadata, "timer_session_id");
+
+  if (workBlockId) {
+    const { error: attributionError } = await supabase
+      .from("work_block_attributions")
+      .delete()
+      .eq("work_block_id", workBlockId)
+      .eq("user_id", userId);
+
+    if (attributionError) {
+      throw new Error(
+        toErrorMessage(attributionError, "Could not remove the work block attribution."),
+      );
+    }
+
+    const { error: workBlockError } = await supabase
+      .from("work_blocks")
+      .delete()
+      .eq("id", workBlockId)
+      .eq("user_id", userId);
+
+    if (workBlockError) {
+      throw new Error(toErrorMessage(workBlockError, "Could not remove the work block."));
+    }
+  }
+
+  if (timerSessionId) {
+    const { error: timerSessionError } = await supabase
+      .from("timer_sessions")
+      .delete()
+      .eq("id", timerSessionId)
+      .eq("user_id", userId);
+
+    if (timerSessionError) {
+      throw new Error(toErrorMessage(timerSessionError, "Could not remove the timer session."));
+    }
+  }
+
+  const { error: ledgerError } = await supabase
+    .from("ledger_events")
+    .delete()
+    .eq("id", ledgerEvent.id)
+    .eq("user_id", userId);
+
+  if (ledgerError) {
+    throw new Error(toErrorMessage(ledgerError, "Could not remove the ledger event."));
+  }
+}
+
+export async function hardDeleteRewardSpendEvent(
+  supabase: SupabaseClient,
+  { ledgerEvent, userId }: { ledgerEvent: LedgerEvent; userId: string },
+) {
+  const rewardRedemptionId = getMetadataString(ledgerEvent.metadata, "reward_redemption_id");
+  const rewardRuleId = getMetadataString(ledgerEvent.metadata, "reward_rule_id");
+
+  if (rewardRedemptionId) {
+    const { error } = await supabase
+      .from("reward_redemptions")
+      .delete()
+      .eq("id", rewardRedemptionId)
+      .eq("user_id", userId);
+
+    if (error) {
+      throw new Error(toErrorMessage(error, "Could not remove the reward redemption."));
+    }
+  }
+
+  if (rewardRuleId) {
+    const { error } = await supabase
+      .from("reward_rules")
+      .delete()
+      .eq("id", rewardRuleId)
+      .eq("user_id", userId);
+
+    if (error) {
+      throw new Error(toErrorMessage(error, "Could not remove the reward rule."));
+    }
+  }
+
+  const { error } = await supabase
+    .from("ledger_events")
+    .delete()
+    .eq("id", ledgerEvent.id)
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(toErrorMessage(error, "Could not remove the ledger event."));
+  }
+}
+
+export async function hardDeleteLedgerEvent(
+  supabase: SupabaseClient,
+  { ledgerEvent, userId }: { ledgerEvent: LedgerEvent; userId: string },
+) {
+  if (ledgerEvent.event_type === "reward_spent") {
+    return hardDeleteRewardSpendEvent(supabase, { ledgerEvent, userId });
+  }
+
+  return hardDeleteWorkEvent(supabase, { ledgerEvent, userId });
+}
+
+export async function hardResetWorkspace(
+  supabase: SupabaseClient,
+  { userId }: { userId: string },
+) {
+  // Deletion order respects foreign keys: attributions -> work blocks -> timer sessions,
+  // then reward redemptions -> reward rules (restrict), then ledger events.
+  const tables = [
+    "work_block_attributions",
+    "work_blocks",
+    "timer_sessions",
+    "reward_redemptions",
+    "reward_rules",
+    "behavior_events",
+    "ledger_events",
+  ] as const;
+
+  for (const table of tables) {
+    const { error } = await supabase.from(table).delete().eq("user_id", userId);
+
+    if (error) {
+      throw new Error(toErrorMessage(error, `Could not clear ${table}.`));
+    }
   }
 }
 

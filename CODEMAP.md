@@ -23,7 +23,9 @@ src/
     ledger/
       LedgerEventList.tsx
     overview/
+      MiniBlocks.tsx
       OverviewModule.tsx
+      WeeklyOverview.tsx
     timer/
       PomodoroTimer.tsx
       TimerControls.tsx
@@ -35,9 +37,10 @@ src/
       Dialog.tsx
       StatCard.tsx
   lib/
+    behaviors.ts
     cn.ts
+    economy.ts
     ledger.ts
-    rewards.ts
     tasks.ts
     supabase/
       client.ts
@@ -58,6 +61,7 @@ tsconfig.json
 tsconfig.typecheck.json
 
 docs/
+  ECONOMY.md
   PRODUCT_SPEC.updated.md
   STYLE_GUIDE.md
   TASKS.updated.md
@@ -69,6 +73,8 @@ supabase/
     20260528011500_add_daily_focus.sql
     20260528023000_add_work_block_attributions.sql
     20260528103000_add_ledger_event_correction_fields.sql
+    20260823000000_add_work_block_attribution_delete_policy.sql
+    20260823000001_add_behavior_events.sql
 ```
 
 ## Planned Structure
@@ -139,7 +145,7 @@ Read:
 ### Timer UI
 
 Current files:
-- `src/components/timer/PomodoroTimer.tsx`
+- `src/components/timer/PomodoroTimer.tsx` (rolls completed work sessions into an overage count-up mode instead of stopping)
 - `src/components/timer/TimerControls.tsx`
 - `src/components/timer/TimerModeTabs.tsx`
 - `src/lib/timer.ts`
@@ -162,8 +168,8 @@ Planned files:
 ### Rewards
 
 Current files:
-- `src/lib/rewards.ts`
-- `src/app/page.tsx` derives the live reward balance from ledger events and hosts subtle manual reward/work correction entry points.
+- `src/lib/economy.ts` is the canonical block-economy math (work blocks, reward rates, settlement, partial blocks). See `docs/ECONOMY.md`.
+- `src/app/page.tsx` derives the live reward balance from ledger + behavior events and hosts subtle manual reward/work correction entry points.
 
 Planned files:
 - `src/components/rewards/RewardBalance.tsx`
@@ -175,6 +181,14 @@ Planned files:
 
 Current file:
 - `src/lib/types.ts`
+
+### Behavior tracking
+
+Current files:
+- `src/lib/behaviors.ts` holds behavior events (indulgence, screen time, exercise) and their reward/penalty math, plus edit/delete persistence.
+- `src/components/overview/MiniBlocks.tsx` renders 1-hour blocks with partial-fill support and solid/outline/destroyed variants.
+- `src/components/overview/WeeklyOverview.tsx` renders the weekly Work / Reward / Penalty sections plus destroyed reward blocks.
+- `src/app/page.tsx` hosts the "Behavior tracking" dialog and mixes behavior events into reward accounting.
 
 Task storage files:
 - `src/lib/tasks.ts` handles canonical task CRUD, task sorting, and revision fetching.

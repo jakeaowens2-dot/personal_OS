@@ -171,3 +171,19 @@ export type WorkBlockAttribution = {
   deleted_by_actor_label?: string | null;
   deletion_reason?: string | null;
 };
+
+export type BehaviorType = "indulgence" | "screen_time" | "exercise";
+
+export type BehaviorEvent = {
+  id: string;
+  user_id: string;
+  behavior_type: BehaviorType;
+  occurred_at: string;
+  duration_minutes: number | null;
+  penalty_minutes: number | null;
+  note: string | null;
+  deleted_at?: string | null;
+  deleted_by_actor_label?: string | null;
+  deletion_reason?: string | null;
+  created_at: string;
+};
