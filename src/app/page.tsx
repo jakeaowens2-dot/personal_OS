@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
+import { TaskPriorityLabel } from "@/components/ui/TaskPriorityLabel";
 import { dedupeLedgerEvents } from "@/lib/ledger";
 import {
   computeScreenTimePenalty,
@@ -39,11 +40,15 @@ import {
 } from "@/lib/economy";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
+  addTaskToDailyFocus,
   createTask,
   ensureHousekeepingTask,
   fetchDailyFocusItems,
   fetchMostRecentAttributedTaskId,
+  fetchTasks,
   fetchTasksByIds,
+  TASK_PRIORITY_ORDER,
+  updateTask,
 } from "@/lib/tasks";
 import { exercisePalette, penaltyPalette, rewardPalette, timerPalette } from "@/lib/timerPalette";
 import {
@@ -63,13 +68,14 @@ import {
   updateManualWorkEntry,
   updateRewardSpendEntry,
 } from "@/lib/workspace";
-import { archiveTask, completeTask, removeTaskFromDailyFocus } from "@/lib/tasks";
+import { archiveTask, completeDailyFocusItem, completeTask, dropDailyFocusItem, removeTaskFromDailyFocus } from "@/lib/tasks";
 import type {
   BehaviorEvent,
   BehaviorType,
   DailyFocusItemWithTask,
   LedgerEvent,
   Task,
+  TaskPriority,
   TimerMode,
   TimerSession,
   WorkBlock,
@@ -98,8 +104,7 @@ type PersistenceState =
 type AttributionSelectionState = {
   availableTasks: Task[];
   choresTask: Task;
-  otherSelected: boolean;
-  otherTitle: string;
+  createdTasksThisTurn: Task[];
   selectedTaskIds: string[];
 };
 
@@ -167,16 +172,44 @@ function getTodayLabel() {
   }).format(new Date());
 }
 
-function isThisWeek(isoTimestamp: string) {
-  const date = new Date(isoTimestamp);
-  const now = new Date();
-  const currentDay = now.getDay();
-  const distanceFromMonday = currentDay === 0 ? 6 : currentDay - 1;
-  const startOfWeek = new Date(now);
-  startOfWeek.setHours(0, 0, 0, 0);
-  startOfWeek.setDate(now.getDate() - distanceFromMonday);
+function getWeekStart(date: Date) {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const day = start.getDay();
+  const distanceFromMonday = day === 0 ? 6 : day - 1;
+  start.setDate(start.getDate() - distanceFromMonday);
+  return start;
+}
 
-  return date >= startOfWeek;
+function shiftWeeks(date: Date, weeks: number) {
+  const shifted = new Date(date);
+  shifted.setDate(shifted.getDate() + weeks * 7);
+  return shifted;
+}
+
+function isWithinWeek(isoTimestamp: string, weekStart: Date) {
+  const date = new Date(isoTimestamp);
+  const weekEnd = shiftWeeks(weekStart, 1);
+  return date >= weekStart && date < weekEnd;
+}
+
+function formatWeekRangeLabel(weekStart: Date) {
+  const lastDay = new Date(shiftWeeks(weekStart, 1).getTime() - 1);
+  const currentYear = new Date().getFullYear();
+
+  const start = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(weekStart.getFullYear() === currentYear ? {} : { year: "numeric" }),
+  }).format(weekStart);
+
+  const end = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    ...(lastDay.getFullYear() === currentYear ? {} : { year: "numeric" }),
+  }).format(lastDay);
+
+  return `${start} – ${end}`;
 }
 
 function dedupeWorkBlocks(workBlocks: WorkBlock[]) {
@@ -273,16 +306,19 @@ function inputClassName() {
   return "h-11 w-full rounded-[0.8rem] border border-slate-300/80 bg-white/80 px-4 text-sm text-slate-900 outline-none transition focus:border-slate-400";
 }
 
+function textareaClassName() {
+  return "min-h-28 w-full rounded-[0.8rem] border border-slate-300/80 bg-white/80 px-4 py-3 text-sm text-slate-900 outline-none transition focus:border-slate-400";
+}
+
 type AttributionFieldsProps = {
   availableTasks: Task[];
   choresTask: Task;
   durationMinutes: number;
   emptyStateMessage: string;
-  onOtherSelectedChange: (checked: boolean) => void;
-  onOtherTitleChange: (value: string) => void;
+  onCreateTask: (title: string) => Promise<void>;
+  onLoadLibrary: () => Promise<Task[]>;
+  onSelectLibraryTask: (task: Task) => void;
   onToggleTask: (taskId: string) => void;
-  otherSelected: boolean;
-  otherTitle: string;
   selectedTaskIds: string[];
 };
 
@@ -291,86 +327,211 @@ function AttributionFields({
   choresTask,
   durationMinutes,
   emptyStateMessage,
-  onOtherSelectedChange,
-  onOtherTitleChange,
+  onCreateTask,
+  onLoadLibrary,
+  onSelectLibraryTask,
   onToggleTask,
-  otherSelected,
-  otherTitle,
   selectedTaskIds,
 }: AttributionFieldsProps) {
+  const [showNewTaskCard, setShowNewTaskCard] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [creatingTask, setCreatingTask] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [libraryQuery, setLibraryQuery] = useState("");
+  const [libraryTasks, setLibraryTasks] = useState<Task[]>([]);
+  const [loadingLibrary, setLoadingLibrary] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+
+  const openLibrary = async () => {
+    setShowLibrary(true);
+    setLoadingLibrary(true);
+    setLibraryError(null);
+
+    try {
+      setLibraryTasks(await onLoadLibrary());
+    } catch (error) {
+      setLibraryError(error instanceof Error ? error.message : "Could not load the task library.");
+    } finally {
+      setLoadingLibrary(false);
+    }
+  };
+
+  const submitNewTask = async () => {
+    const title = newTaskTitle.trim();
+
+    if (!title || creatingTask) {
+      return;
+    }
+
+    setCreatingTask(true);
+
+    try {
+      await onCreateTask(title);
+      setNewTaskTitle("");
+      setShowNewTaskCard(false);
+    } catch {
+      // The parent surfaces the error via persistence state; keep the card open so
+      // the user can retry without losing their draft.
+    } finally {
+      setCreatingTask(false);
+    }
+  };
+
+  const selectLibraryTask = (task: Task) => {
+    onSelectLibraryTask(task);
+    setShowLibrary(false);
+    setLibraryQuery("");
+    setShowNewTaskCard(false);
+    setNewTaskTitle("");
+  };
+
+  const filteredLibraryTasks = libraryTasks.filter((task) => {
+    if (task.id === choresTask.id) {
+      return false;
+    }
+
+    const query = libraryQuery.trim().toLowerCase();
+    return query.length === 0 || task.title.toLowerCase().includes(query);
+  });
+
   return (
-    <div className="space-y-5">
-      <div className="space-y-3">
-        {availableTasks.length > 0 ? (
-          availableTasks.map((task) => {
-            const checked = selectedTaskIds.includes(task.id);
+    <>
+      <div className="space-y-5">
+        <div className="space-y-3">
+          {availableTasks.length > 0 ? (
+            availableTasks.map((task) => {
+              const checked = selectedTaskIds.includes(task.id);
 
-            return (
-              <label
-                key={task.id}
-                className="flex items-start gap-3 rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3"
-              >
-                <input
-                  checked={checked}
-                  className="mt-1 h-4 w-4 accent-[var(--accent)]"
-                  onChange={() => onToggleTask(task.id)}
-                  type="checkbox"
-                />
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-slate-950">{task.title}</p>
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                    {task.priority}
-                    {task.area ? ` · ${task.area}` : ""}
-                  </p>
-                </div>
-              </label>
-            );
-          })
-        ) : (
-          <p className="text-sm text-slate-500">{emptyStateMessage}</p>
-        )}
-      </div>
-
-      <label className="flex items-start gap-3 rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
-        <input
-          checked={selectedTaskIds.includes(choresTask.id)}
-          className="mt-1 h-4 w-4 accent-[var(--accent)]"
-          onChange={() => onToggleTask(choresTask.id)}
-          type="checkbox"
-        />
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-slate-950">{choresTask.title}</p>
-          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">always available</p>
+              return (
+                <label
+                  key={task.id}
+                  className="flex items-start gap-3 rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3"
+                >
+                  <input
+                    checked={checked}
+                    className="mt-1 h-4 w-4 accent-[var(--accent)]"
+                    onChange={() => onToggleTask(task.id)}
+                    type="checkbox"
+                  />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-slate-950">{task.title}</p>
+                    <TaskPriorityLabel area={task.area} priority={task.priority} />
+                  </div>
+                </label>
+              );
+            })
+          ) : (
+            <p className="text-sm text-slate-500">{emptyStateMessage}</p>
+          )}
         </div>
-      </label>
 
-      <div className="space-y-3 rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
-        <label className="flex items-start gap-3">
+        <label className="flex items-start gap-3 rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
           <input
-            checked={otherSelected}
+            checked={selectedTaskIds.includes(choresTask.id)}
             className="mt-1 h-4 w-4 accent-[var(--accent)]"
-            onChange={(event) => onOtherSelectedChange(event.target.checked)}
+            onChange={() => onToggleTask(choresTask.id)}
             type="checkbox"
           />
           <div className="space-y-1">
-            <p className="text-sm font-medium text-slate-950">Other</p>
-            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">create a canonical task</p>
+            <p className="text-sm font-medium text-slate-950">{choresTask.title}</p>
+            <p className="text-xs uppercase tracking-[0.18em] text-slate-500">always available</p>
           </div>
         </label>
-        {otherSelected ? (
-          <input
-            className={inputClassName()}
-            onChange={(event) => onOtherTitleChange(event.target.value)}
-            placeholder="Name the work you just did"
-            value={otherTitle}
-          />
+
+        {showNewTaskCard ? (
+          <div className="relative space-y-3 rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
+            <button
+              aria-label="Close new task"
+              className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-full text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+              onClick={() => {
+                setShowNewTaskCard(false);
+                setNewTaskTitle("");
+              }}
+              type="button"
+            >
+              ×
+            </button>
+            <span className="text-sm text-slate-600">Task name</span>
+            <input
+              autoFocus
+              className={inputClassName()}
+              onChange={(event) => setNewTaskTitle(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  void submitNewTask();
+                }
+              }}
+              placeholder="Name the new task"
+              value={newTaskTitle}
+            />
+            <div className="flex items-center justify-between gap-2">
+              <Button onClick={openLibrary} variant="text">
+                Search from task library
+              </Button>
+              <Button disabled={!newTaskTitle.trim() || creatingTask} onClick={submitNewTask} variant="secondary">
+                {creatingTask ? "Adding…" : "Add task"}
+              </Button>
+            </div>
+          </div>
         ) : null}
+
+        <div className="border-t border-slate-200/80 pt-4 text-center">
+          <button
+            className="inline-flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 transition hover:border-emerald-400 hover:bg-emerald-100"
+            onClick={() => {
+              setShowNewTaskCard(true);
+              setShowLibrary(false);
+            }}
+            type="button"
+          >
+            <span aria-hidden="true" className="text-xl leading-none text-emerald-600">
+              +
+            </span>
+            Add a task
+          </button>
+        </div>
+
+        <p className="text-sm text-slate-500">
+          Selected tasks will split {durationMinutes} minutes evenly.
+        </p>
       </div>
 
-      <p className="border-t border-slate-200/80 pt-4 text-sm text-slate-500">
-        Selected tasks will split {durationMinutes} minutes evenly.
-      </p>
-    </div>
+      <Dialog onClose={() => setShowLibrary(false)} open={showLibrary} title="Select from task library">
+        <div className="space-y-3">
+          <input
+            autoFocus
+            className={inputClassName()}
+            onChange={(event) => setLibraryQuery(event.target.value)}
+            placeholder="Search your tasks"
+            value={libraryQuery}
+          />
+          <div className="max-h-96 space-y-1 overflow-y-auto pr-1">
+            {loadingLibrary ? (
+              <p className="px-1 py-2 text-sm text-slate-500">Loading task library…</p>
+            ) : libraryError ? (
+              <p className="px-1 py-2 text-sm text-rose-700">{libraryError}</p>
+            ) : filteredLibraryTasks.length > 0 ? (
+              filteredLibraryTasks.map((task) => (
+                <button
+                  key={task.id}
+                  className="flex w-full items-center justify-between gap-3 rounded-[0.6rem] px-2 py-2 text-left transition hover:bg-slate-100"
+                  onClick={() => selectLibraryTask(task)}
+                  type="button"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-950">{task.title}</p>
+                    <TaskPriorityLabel area={task.area} priority={task.priority} />
+                  </div>
+                  <span className="shrink-0 text-sm text-[var(--accent)]">Select</span>
+                </button>
+              ))
+            ) : (
+              <p className="px-1 py-2 text-sm text-slate-500">No matching tasks.</p>
+            )}
+          </div>
+        </div>
+      </Dialog>
+    </>
   );
 }
 
@@ -418,6 +579,15 @@ export default function HomePage() {
   const [behaviorDeleteTarget, setBehaviorDeleteTarget] = useState<BehaviorEvent | null>(null);
   const [breakRequest, setBreakRequest] = useState<{ token: number; minutes: number } | null>(null);
   const [pendingSessionEnd, setPendingSessionEnd] = useState<PendingSessionEnd | null>(null);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [metadataQueue, setMetadataQueue] = useState<Task[]>([]);
+  const [metadataDraft, setMetadataDraft] = useState<{
+    area: string;
+    description: string;
+    dueAt: string;
+    priority: TaskPriority;
+    title: string;
+  }>({ area: "", description: "", dueAt: "", priority: "medium", title: "" });
   const handledCompletionKeysRef = useRef(new Set<string>());
 
   const dedupedWorkBlocks = useMemo(
@@ -466,15 +636,34 @@ export default function HomePage() {
     [],
   );
 
+  const weeklyWeekStart = useMemo(
+    () => shiftWeeks(getWeekStart(new Date()), weekOffset),
+    [weekOffset],
+  );
+
+  const weekLabel = useMemo(() => {
+    if (weekOffset === 0) {
+      return "This week";
+    }
+
+    if (weekOffset === -1) {
+      return "Last week";
+    }
+
+    return formatWeekRangeLabel(weeklyWeekStart);
+  }, [weekOffset, weeklyWeekStart]);
+
   const weeklyWorkBlocks = useMemo(
-    () => dedupedWorkBlocks.filter((workBlock) => isThisWeek(workBlock.earned_at)),
-    [dedupedWorkBlocks],
+    () => dedupedWorkBlocks.filter((workBlock) => isWithinWeek(workBlock.earned_at, weeklyWeekStart)),
+    [dedupedWorkBlocks, weeklyWeekStart],
   );
 
   const weeklyRewardWorkMinutes = useMemo(
     () =>
       dedupedLedgerEvents
-        .filter((event) => event.event_type === "work_earned" && isThisWeek(event.created_at))
+        .filter(
+          (event) => event.event_type === "work_earned" && isWithinWeek(event.created_at, weeklyWeekStart),
+        )
         .reduce(
           (total, event) =>
             total +
@@ -484,7 +673,7 @@ export default function HomePage() {
             ),
           0,
         ),
-    [dedupedLedgerEvents],
+    [dedupedLedgerEvents, weeklyWeekStart],
   );
 
   const weeklyWorkMinutes = useMemo(
@@ -495,17 +684,21 @@ export default function HomePage() {
   const weeklyExerciseMinutes = useMemo(
     () =>
       behaviorEvents
-        .filter((event) => event.behavior_type === "exercise" && isThisWeek(event.occurred_at))
+        .filter(
+          (event) => event.behavior_type === "exercise" && isWithinWeek(event.occurred_at, weeklyWeekStart),
+        )
         .reduce((total, event) => total + (event.duration_minutes ?? 0), 0),
-    [behaviorEvents],
+    [behaviorEvents, weeklyWeekStart],
   );
 
   const weeklyPenaltyMinutes = useMemo(
     () =>
       behaviorEvents
-        .filter((event) => event.behavior_type !== "exercise" && isThisWeek(event.occurred_at))
+        .filter(
+          (event) => event.behavior_type !== "exercise" && isWithinWeek(event.occurred_at, weeklyWeekStart),
+        )
         .reduce((total, event) => total + (event.penalty_minutes ?? 0), 0),
-    [behaviorEvents],
+    [behaviorEvents, weeklyWeekStart],
   );
 
   const recentActivityItems = useMemo(
@@ -797,8 +990,7 @@ export default function HomePage() {
     return {
       availableTasks,
       choresTask,
-      otherSelected: false,
-      otherTitle: "",
+      createdTasksThisTurn: [],
       selectedTaskIds,
     };
   };
@@ -1034,18 +1226,7 @@ export default function HomePage() {
     });
 
     try {
-      const selections = await buildAttributionSelections({
-        actorLabel: manualWorkDialogMode.kind === "edit" ? "Manual work edit" : "Manual work",
-        humanSummary:
-          manualWorkDialogMode.kind === "edit"
-            ? "Updated from manual work edit dialog."
-            : "Captured from manual work dialog.",
-        reason:
-          manualWorkDialogMode.kind === "edit"
-            ? "Created while editing a manual work attribution"
-            : "Created from manual work attribution",
-        selectionState: manualAttributionState,
-      });
+      const selections = buildAttributionSelections(manualAttributionState);
 
       if (manualWorkDialogMode.kind === "edit") {
         await updateManualWorkEntry(supabase, {
@@ -1080,6 +1261,7 @@ export default function HomePage() {
       await reloadDailyFocusItems(workspaceUserId);
       setManualWorkNote("");
       setManualWorkMinutes("50");
+      const createdTasksThisTurn = manualAttributionState.createdTasksThisTurn;
       setManualAttributionState(null);
       setManualWorkDialogMode({ kind: "create" });
       setIsManualDialogOpen(false);
@@ -1089,6 +1271,16 @@ export default function HomePage() {
           ? "Manual work block updated"
           : "Manual work block saved and attributed",
       });
+      if (createdTasksThisTurn.length > 0) {
+        setMetadataQueue(createdTasksThisTurn);
+        setMetadataDraft({
+          area: "",
+          description: "",
+          dueAt: "",
+          priority: "medium",
+          title: createdTasksThisTurn[0].title,
+        });
+      }
     } catch (error) {
       setPersistenceState({
         kind: "error",
@@ -1310,7 +1502,7 @@ export default function HomePage() {
 
     try {
       await completeTask(supabase, item.task, { label: "Daily focus", type: "human" }, workspaceUserId);
-      await removeTaskFromDailyFocus(supabase, item.id);
+      await completeDailyFocusItem(supabase, item.id);
       await reloadDailyFocusItems(workspaceUserId);
       setPersistenceState({
         kind: "saved",
@@ -1336,7 +1528,7 @@ export default function HomePage() {
 
     try {
       await archiveTask(supabase, item.task, { label: "Daily focus", type: "human" }, workspaceUserId);
-      await removeTaskFromDailyFocus(supabase, item.id);
+      await dropDailyFocusItem(supabase, item.id);
       await reloadDailyFocusItems(workspaceUserId);
       setPersistenceState({
         kind: "saved",
@@ -1410,30 +1602,14 @@ export default function HomePage() {
   };
 
   const getAttributionValidationMessage = (selectionState: AttributionSelectionState) => {
-    const trimmedOtherTitle = selectionState.otherTitle.trim();
-
-    if (selectionState.selectedTaskIds.length === 0 && !selectionState.otherSelected) {
-      return "Choose at least one task, chores/housekeeping, or other before saving attribution.";
-    }
-
-    if (selectionState.otherSelected && !trimmedOtherTitle) {
-      return "Give the “other” work a short task title before saving attribution.";
+    if (selectionState.selectedTaskIds.length === 0) {
+      return "Choose at least one task or chores/housekeeping before saving attribution.";
     }
 
     return null;
   };
 
-  const buildAttributionSelections = async ({
-    actorLabel,
-    humanSummary,
-    reason,
-    selectionState,
-  }: {
-    actorLabel: string;
-    humanSummary: string;
-    reason: string;
-    selectionState: AttributionSelectionState;
-  }) => {
+  const buildAttributionSelections = (selectionState: AttributionSelectionState) => {
     if (!supabase || !workspaceUserId) {
       throw new Error("Workspace is not connected yet. Wait for the connection to finish before attributing work.");
     }
@@ -1460,27 +1636,196 @@ export default function HomePage() {
       });
     }
 
-    if (selectionState.otherSelected) {
-      const createdTask = await createTask(supabase, {
-        actor: {
-          label: actorLabel,
-          type: "human",
-        },
-        humanSummary,
-        priority: "medium",
-        reason,
-        source: "attribution_capture",
-        title: selectionState.otherTitle.trim(),
+    return selections;
+  };
+
+  const persistNewAttributionTask = async (
+    title: string,
+    context: { actorLabel: string; humanSummary: string; reason: string },
+  ) => {
+    if (!supabase || !workspaceUserId) {
+      throw new Error("Workspace is not connected yet. Wait for the connection to finish before adding a task.");
+    }
+
+    const created = await createTask(supabase, {
+      actor: { label: context.actorLabel, type: "human" },
+      humanSummary: context.humanSummary,
+      priority: "medium",
+      reason: context.reason,
+      source: "attribution_capture",
+      title: title.trim(),
+      userId: workspaceUserId,
+    });
+
+    await addTaskToDailyFocus(supabase, workspaceUserId, created.id);
+
+    return created;
+  };
+
+  const loadTaskLibrary = async () => {
+    if (!supabase || !workspaceUserId) {
+      throw new Error("Workspace is not connected yet.");
+    }
+
+    return fetchTasks(supabase, workspaceUserId, { includeArchived: false });
+  };
+
+  const applyCreatedTaskToAttribution = (created: Task) => {
+    setAttributionDialogState((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const alreadyPresent = current.availableTasks.some((task) => task.id === created.id);
+
+      return {
+        ...current,
+        availableTasks: alreadyPresent ? current.availableTasks : [...current.availableTasks, created],
+        createdTasksThisTurn: current.createdTasksThisTurn.some((task) => task.id === created.id)
+          ? current.createdTasksThisTurn
+          : [...current.createdTasksThisTurn, created],
+        selectedTaskIds: current.selectedTaskIds.includes(created.id)
+          ? current.selectedTaskIds
+          : [...current.selectedTaskIds, created.id],
+      };
+    });
+  };
+
+  const applyCreatedTaskToManual = (created: Task) => {
+    setManualAttributionState((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const alreadyPresent = current.availableTasks.some((task) => task.id === created.id);
+
+      return {
+        ...current,
+        availableTasks: alreadyPresent ? current.availableTasks : [...current.availableTasks, created],
+        createdTasksThisTurn: current.createdTasksThisTurn.some((task) => task.id === created.id)
+          ? current.createdTasksThisTurn
+          : [...current.createdTasksThisTurn, created],
+        selectedTaskIds: current.selectedTaskIds.includes(created.id)
+          ? current.selectedTaskIds
+          : [...current.selectedTaskIds, created.id],
+      };
+    });
+  };
+
+  const handleAttributionCreateTask = async (title: string) => {
+    try {
+      const created = await persistNewAttributionTask(title, {
+        actorLabel: "Work attribution",
+        humanSummary: "Captured as a new focus task during work attribution.",
+        reason: "Created from work attribution new-task capture",
+      });
+      applyCreatedTaskToAttribution(created);
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not create the task.",
+      });
+      throw error;
+    }
+  };
+
+  const handleManualCreateTask = async (title: string) => {
+    try {
+      const created = await persistNewAttributionTask(title, {
+        actorLabel: "Manual work",
+        humanSummary: "Captured as a new focus task during manual work entry.",
+        reason: "Created from manual work new-task capture",
+      });
+      applyCreatedTaskToManual(created);
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not create the task.",
+      });
+      throw error;
+    }
+  };
+
+  const selectLibraryTaskForAttribution = (task: Task) => {
+    setAttributionDialogState((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const alreadyPresent = current.availableTasks.some((candidate) => candidate.id === task.id);
+
+      return {
+        ...current,
+        availableTasks: alreadyPresent ? current.availableTasks : [...current.availableTasks, task],
+        selectedTaskIds: current.selectedTaskIds.includes(task.id)
+          ? current.selectedTaskIds
+          : [...current.selectedTaskIds, task.id],
+      };
+    });
+  };
+
+  const selectLibraryTaskForManual = (task: Task) => {
+    setManualAttributionState((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const alreadyPresent = current.availableTasks.some((candidate) => candidate.id === task.id);
+
+      return {
+        ...current,
+        availableTasks: alreadyPresent ? current.availableTasks : [...current.availableTasks, task],
+        selectedTaskIds: current.selectedTaskIds.includes(task.id)
+          ? current.selectedTaskIds
+          : [...current.selectedTaskIds, task.id],
+      };
+    });
+  };
+
+  const handleSubmitTaskMetadata = async () => {
+    const current = metadataQueue[0];
+
+    if (!supabase || !workspaceUserId || !current) {
+      return;
+    }
+
+    setPersistenceState({ kind: "saving", message: "Saving task metadata…" });
+
+    try {
+      await updateTask(supabase, current, {
+        actor: { label: "Work attribution", type: "human" },
+        area: metadataDraft.area,
+        description: metadataDraft.description,
+        dueAt: metadataDraft.dueAt.trim() ? metadataDraft.dueAt : null,
+        priority: metadataDraft.priority,
+        reason: "Metadata added after task creation",
+        taskId: current.id,
+        title: metadataDraft.title,
         userId: workspaceUserId,
       });
 
-      selections.push({
-        label: createdTask.title,
-        taskId: createdTask.id,
+      await reloadDailyFocusItems(workspaceUserId);
+      const remaining = metadataQueue.slice(1);
+      setMetadataQueue(remaining);
+      setMetadataDraft({
+        area: "",
+        description: "",
+        dueAt: "",
+        priority: "medium",
+        title: remaining[0]?.title ?? "",
+      });
+      setPersistenceState({ kind: "saved", message: "Task metadata saved" });
+    } catch (error) {
+      setPersistenceState({
+        kind: "error",
+        message: error instanceof Error ? error.message : "Could not save the task metadata.",
       });
     }
+  };
 
-    return selections;
+  const handleCompleteMetadataLater = () => {
+    setMetadataQueue([]);
+    setMetadataDraft({ area: "", description: "", dueAt: "", priority: "medium", title: "" });
   };
 
   const handleMagicLinkSignIn = async () => {
@@ -1698,12 +2043,7 @@ export default function HomePage() {
     });
 
     try {
-      const selections = await buildAttributionSelections({
-        actorLabel: "Work attribution",
-        humanSummary: "Captured from post-work-block attribution.",
-        reason: "Created from work attribution dialog",
-        selectionState: attributionDialogState,
-      });
+      const selections = buildAttributionSelections(attributionDialogState);
 
       const result = await persistWorkBlockAttributions(supabase, {
         durationMinutes: attributionDialogState.workBlock.duration_minutes,
@@ -1720,11 +2060,22 @@ export default function HomePage() {
         ),
       }));
       await reloadDailyFocusItems(workspaceUserId);
+      const createdTasksThisTurn = attributionDialogState.createdTasksThisTurn;
       setAttributionDialogState(null);
       setPersistenceState({
         kind: "saved",
         message: "Work block attributed",
       });
+      if (createdTasksThisTurn.length > 0) {
+        setMetadataQueue(createdTasksThisTurn);
+        setMetadataDraft({
+          area: "",
+          description: "",
+          dueAt: "",
+          priority: "medium",
+          title: createdTasksThisTurn[0].title,
+        });
+      }
     } catch (error) {
       setPersistenceState({
         kind: "error",
@@ -1842,10 +2193,7 @@ export default function HomePage() {
                       <span className="text-xs uppercase tracking-[0.18em] text-slate-400">{index + 1}</span>
                       <p className="text-sm font-semibold text-slate-950">{item.task.title}</p>
                     </div>
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                      {item.task.priority}
-                      {item.task.area ? ` · ${item.task.area}` : ""}
-                    </p>
+                    <TaskPriorityLabel area={item.task.area} priority={item.task.priority} />
                     {item.task.human_summary ? (
                       <p className="text-sm leading-6 text-slate-600">{item.task.human_summary}</p>
                     ) : null}
@@ -1980,6 +2328,30 @@ export default function HomePage() {
 
           <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
             <OverviewModule
+              action={
+                <div className="flex items-center gap-1">
+                  <button
+                    aria-label="Previous week"
+                    className="cursor-pointer rounded-[0.6rem] px-2 py-1 text-base leading-none text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                    onClick={() => setWeekOffset((current) => current - 1)}
+                    type="button"
+                  >
+                    ←
+                  </button>
+                  <span className="min-w-36 whitespace-nowrap text-center text-sm font-medium text-slate-700">
+                    {weekLabel}
+                  </span>
+                  <button
+                    aria-label="Next week"
+                    className="cursor-pointer rounded-[0.6rem] px-2 py-1 text-base leading-none text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-slate-500"
+                    disabled={weekOffset === 0}
+                    onClick={() => setWeekOffset((current) => Math.min(0, current + 1))}
+                    type="button"
+                  >
+                    →
+                  </button>
+                </div>
+              }
               body={
                 <WeeklyOverview
                   exerciseMinutes={weeklyExerciseMinutes}
@@ -2047,18 +2419,11 @@ export default function HomePage() {
               availableTasks={manualAttributionState.availableTasks}
               choresTask={manualAttributionState.choresTask}
               durationMinutes={Number.parseInt(manualWorkMinutes, 10) || 0}
-              emptyStateMessage="No today-list tasks are available, so chores or other are the current attribution options."
-              onOtherSelectedChange={(checked) =>
-                setManualAttributionState((current) =>
-                  current ? { ...current, otherSelected: checked } : current
-                )}
-              onOtherTitleChange={(value) =>
-                setManualAttributionState((current) =>
-                  current ? { ...current, otherTitle: value } : current
-                )}
+              emptyStateMessage="No focus tasks yet — add a task or select from your task library."
+              onCreateTask={handleManualCreateTask}
+              onLoadLibrary={loadTaskLibrary}
+              onSelectLibraryTask={selectLibraryTaskForManual}
               onToggleTask={toggleManualAttributionTask}
-              otherSelected={manualAttributionState.otherSelected}
-              otherTitle={manualAttributionState.otherTitle}
               selectedTaskIds={manualAttributionState.selectedTaskIds}
             />
 
@@ -2164,24 +2529,101 @@ export default function HomePage() {
               availableTasks={attributionDialogState.availableTasks}
               choresTask={attributionDialogState.choresTask}
               durationMinutes={attributionDialogState.workBlock.duration_minutes}
-              emptyStateMessage="No today-list tasks are available, so chores or other are the current attribution options."
-              onOtherSelectedChange={(checked) =>
-                setAttributionDialogState((current) =>
-                  current ? { ...current, otherSelected: checked } : current
-                )}
-              onOtherTitleChange={(value) =>
-                setAttributionDialogState((current) =>
-                  current ? { ...current, otherTitle: value } : current
-                )}
+              emptyStateMessage="No focus tasks yet — add a task or select from your task library."
+              onCreateTask={handleAttributionCreateTask}
+              onLoadLibrary={loadTaskLibrary}
+              onSelectLibraryTask={selectLibraryTaskForAttribution}
               onToggleTask={toggleAttributionTask}
-              otherSelected={attributionDialogState.otherSelected}
-              otherTitle={attributionDialogState.otherTitle}
               selectedTaskIds={attributionDialogState.selectedTaskIds}
             />
 
             <div className="flex justify-end">
               <Button onClick={handleSaveWorkAttribution} variant="secondary">
                 Save attribution
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Dialog>
+
+      <Dialog
+        onClose={handleCompleteMetadataLater}
+        open={metadataQueue.length > 0}
+        title="Enter metadata for new task"
+      >
+        {metadataQueue.length > 0 ? (
+          <div className="space-y-5">
+            <ActionField
+              label="Task name"
+              onChange={(event) =>
+                setMetadataDraft((current) => ({ ...current, title: event.target.value }))
+              }
+              value={metadataDraft.title}
+            />
+
+            <ActionField
+              label="Area"
+              onChange={(event) =>
+                setMetadataDraft((current) => ({ ...current, area: event.target.value }))
+              }
+              placeholder="Operations, Product, Admin…"
+              value={metadataDraft.area}
+            />
+
+            <div className="space-y-2">
+              <span className="text-sm text-slate-600">Priority</span>
+              <div className="grid grid-cols-4 gap-2">
+                {TASK_PRIORITY_ORDER.map((priority) => {
+                  const selected = metadataDraft.priority === priority;
+
+                  return (
+                    <Button
+                      key={priority}
+                      aria-pressed={selected}
+                      className="uppercase tracking-[0.14em]"
+                      onClick={() => setMetadataDraft((current) => ({ ...current, priority }))}
+                      variant={selected ? "primary" : "secondary"}
+                    >
+                      {priority}
+                    </Button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <ActionField
+              label="Due date"
+              onChange={(event) =>
+                setMetadataDraft((current) => ({ ...current, dueAt: event.target.value }))
+              }
+              type="date"
+              value={metadataDraft.dueAt}
+            />
+
+            <div className="space-y-2">
+              <span className="text-sm text-slate-600">Description</span>
+              <textarea
+                className={textareaClassName()}
+                onChange={(event) =>
+                  setMetadataDraft((current) => ({ ...current, description: event.target.value }))
+                }
+                placeholder="Optional notes or context"
+                value={metadataDraft.description}
+              />
+            </div>
+
+            {metadataQueue.length > 1 ? (
+              <p className="text-sm text-slate-500">
+                {metadataQueue.length - 1} more new task{metadataQueue.length - 1 === 1 ? "" : "s"} after this one
+              </p>
+            ) : null}
+
+            <div className="flex justify-end gap-3">
+              <Button onClick={handleCompleteMetadataLater} variant="text">
+                Complete later
+              </Button>
+              <Button onClick={handleSubmitTaskMetadata} variant="secondary">
+                Save metadata
               </Button>
             </div>
           </div>

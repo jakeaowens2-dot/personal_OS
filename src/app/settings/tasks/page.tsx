@@ -6,17 +6,21 @@ import { EmailAuthPanel, type EmailAuthPanelState } from "@/components/auth/Emai
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
+import { TaskPriorityLabel } from "@/components/ui/TaskPriorityLabel";
 import {
   addTaskToDailyFocus,
   archiveTask,
+  completeDailyFocusItem,
   completeTask,
   createTask,
+  dropDailyFocusItem,
   fetchDailyFocusItems,
   fetchTaskRevisions,
   fetchTasks,
   moveDailyFocusItem,
   removeTaskFromDailyFocus,
   restoreTask,
+  TASK_STATUS_LABEL,
   updateTask,
 } from "@/lib/tasks";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -637,7 +641,7 @@ export default function TaskSettingsPage() {
 
     try {
       await completeTask(supabase, item.task, { label: "Daily focus", type: "human" }, workspaceUserId);
-      await removeTaskFromDailyFocus(supabase, item.id);
+      await completeDailyFocusItem(supabase, item.id);
       await reloadTaskData(item.task.id);
       setPageState({
         kind: "ready",
@@ -663,7 +667,7 @@ export default function TaskSettingsPage() {
 
     try {
       await archiveTask(supabase, item.task, { label: "Daily focus", type: "human" }, workspaceUserId);
-      await removeTaskFromDailyFocus(supabase, item.id);
+      await dropDailyFocusItem(supabase, item.id);
       await reloadTaskData(item.task.id);
       setPageState({
         kind: "ready",
@@ -829,11 +833,9 @@ export default function TaskSettingsPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="space-y-1">
                         <p className="text-sm font-semibold text-slate-950">{task.title}</p>
-                        <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                          {task.priority} {task.area ? `· ${task.area}` : ""}
-                        </p>
+                        <TaskPriorityLabel area={task.area} priority={task.priority} />
                       </div>
-                      <Badge tone={getStatusTone(task.status)}>{task.status.replace("_", " ")}</Badge>
+                      <Badge tone={getStatusTone(task.status)}>{TASK_STATUS_LABEL[task.status]}</Badge>
                     </div>
                     {task.human_summary ? (
                       <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">{task.human_summary}</p>
@@ -1007,10 +1009,7 @@ export default function TaskSettingsPage() {
                       <div className="flex items-start justify-between gap-3">
                         <div className="space-y-1">
                           <p className="text-sm font-semibold text-slate-950">{item.task.title}</p>
-                          <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
-                            {item.task.priority}
-                            {item.task.area ? ` · ${item.task.area}` : ""}
-                          </p>
+                          <TaskPriorityLabel area={item.task.area} priority={item.task.priority} />
                         </div>
                         <Badge tone="accent">{index + 1}</Badge>
                       </div>

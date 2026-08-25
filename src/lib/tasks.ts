@@ -63,6 +63,7 @@ const DAILY_FOCUS_ITEM_SELECT_COLUMNS = [
   "task_id",
   "position",
   "focus_status",
+  "carried_forward",
   "note",
   "created_at",
   "updated_at",
@@ -71,6 +72,22 @@ const DAILY_FOCUS_ITEM_SELECT_COLUMNS = [
 
 export const TASK_PRIORITY_ORDER: TaskPriority[] = ["critical", "high", "medium", "low"];
 export const TASK_STATUS_ORDER: TaskStatus[] = ["open", "in_progress", "blocked", "completed", "archived"];
+
+export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  open: "Open",
+  in_progress: "In progress",
+  blocked: "Blocked",
+  completed: "Completed",
+  archived: "Archived",
+};
+
+export const FOCUS_STATUS_LABEL: Record<DailyFocusStatus, string> = {
+  planned: "Planned",
+  active: "Active",
+  done: "Done",
+  deferred: "Deferred",
+  dropped: "Dropped",
+};
 
 export type TaskMutationActor = {
   label?: string;
@@ -575,7 +592,7 @@ export async function addTaskToDailyFocus(
 
   const { data: existingItemData, error: existingItemError } = await supabase
     .from("daily_focus_items")
-    .select("id, daily_focus_list_id, task_id, position, focus_status, note, created_at, updated_at")
+    .select("id, daily_focus_list_id, task_id, position, focus_status, carried_forward, note, created_at, updated_at")
     .eq("daily_focus_list_id", list.id)
     .eq("task_id", taskId)
     .maybeSingle();
@@ -602,7 +619,7 @@ export async function addTaskToDailyFocus(
     const { error } = await supabase
       .from("daily_focus_items")
       .update({
-        focus_status: "planned",
+        focus_status: "active",
         note: note?.trim() || existingItemData.note || null,
         position: nextPosition,
       })
@@ -616,7 +633,7 @@ export async function addTaskToDailyFocus(
       .from("daily_focus_items")
       .insert({
         daily_focus_list_id: list.id,
-        focus_status: "planned",
+        focus_status: "active",
         note: note?.trim() || null,
         position: nextPosition,
         task_id: taskId,
@@ -661,6 +678,24 @@ export async function removeTaskFromDailyFocus(
 ) {
   return updateDailyFocusItem(supabase, itemId, {
     focusStatus: "deferred",
+  });
+}
+
+export async function completeDailyFocusItem(
+  supabase: SupabaseClient,
+  itemId: string,
+) {
+  return updateDailyFocusItem(supabase, itemId, {
+    focusStatus: "done",
+  });
+}
+
+export async function dropDailyFocusItem(
+  supabase: SupabaseClient,
+  itemId: string,
+) {
+  return updateDailyFocusItem(supabase, itemId, {
+    focusStatus: "dropped",
   });
 }
 

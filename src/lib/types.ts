@@ -133,7 +133,7 @@ export type TaskRevision = {
   created_at: string;
 };
 
-export type DailyFocusStatus = "planned" | "active" | "done" | "deferred";
+export type DailyFocusStatus = "planned" | "active" | "done" | "deferred" | "dropped";
 
 export type DailyFocusList = {
   id: string;
@@ -149,6 +149,7 @@ export type DailyFocusItem = {
   task_id: string;
   position: number;
   focus_status: DailyFocusStatus;
+  carried_forward: boolean;
   note: string | null;
   created_at: string;
   updated_at: string;

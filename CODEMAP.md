@@ -35,7 +35,9 @@ src/
       Button.tsx
       Card.tsx
       Dialog.tsx
+      PopoverMenu.tsx
       StatCard.tsx
+      TaskPriorityLabel.tsx
   lib/
     behaviors.ts
     cn.ts

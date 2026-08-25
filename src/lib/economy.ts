@@ -33,9 +33,12 @@ export function rewardMinutesForWorkMinutes(workMinutes: number, isWeekend: bool
   return workBlocksFromMinutes(workMinutes) * rewardMinutesPerWorkBlock(isWeekend);
 }
 
-// Rest duty: 10 min rest per 50 min work, rounded to the nearest standard block.
+// Rest duty: 10 min rest per 50 min work, computed as an exact ratio of the
+// completed work duration (minimum one rest block). A 50-min block earns 10 min
+// rest; a 70-min extended block earns 14 min; 100 min earns 20 min, etc.
 export function restMinutesForWorkMinutes(workMinutes: number) {
-  return Math.max(1, Math.round(workBlocksFromMinutes(workMinutes))) * WORK_BLOCK_REST_MINUTES;
+  const restMinutes = (workMinutes / WORK_BLOCK_WORK_MINUTES) * WORK_BLOCK_REST_MINUTES;
+  return Math.max(WORK_BLOCK_REST_MINUTES, Math.round(restMinutes));
 }
 
 // Whole-block count for a ledger label (cosmetic; exact count is duration-derived).

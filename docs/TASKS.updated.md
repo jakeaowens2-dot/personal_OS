@@ -9,6 +9,104 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Next Up (2026-08-23) — Task attribution: "add a new task" + picker fix
+
+Status: Complete (NU-1 + NU-2)
+
+Note: Reworked the attribution picker in `src/app/page.tsx`. The always-present
+"Other" checkbox is gone. In its place: an "Add a task" button (persists a stub via
+`createTask` with `source=attribution_capture`, `addTaskToDailyFocus`-es it, and
+checks it in the picker) and a text-only "Select from existing task library" button
+opening a searchable popup (`fetchTasks`). After a work block is saved, if any task
+was newly created that turn, a "Enter metadata for new task" dialog opens (area,
+priority, due date, description) with Save or "Complete later". `buildAttributionSelections`
+no longer creates tasks — new tasks are created at "Add a task" time and flow through
+the normal selection mapping. Verified with `npm run typecheck`, `npm run lint`, and
+`npm run build`.
+
+Two changes to the work-block attribution flow, to be done in order. They share the
+same surface (`AttributionFields` + the attribution state/handlers in
+`src/app/page.tsx`), and the second fix partly falls out of the first.
+
+### Conceptual model — "focus" vs. the task library
+
+The picker's `availableTasks` is the day's curated **focus** list, not the whole
+task library. In the future this focus set is assembled by the morning brief /
+planning agent each day, so it changes daily. Conceptually:
+
+- **"Add a task"** (button keeps this label — it's more intuitive) really means
+  **"add a focus"**: the new task is added to today's focus set, alongside anything
+  the morning brief surfaced.
+- The full **task library** (older tasks, backlog) stays out of the picker unless the
+  user explicitly reaches for it via a **"Select from existing task library"** action.
+
+So the picker surface has three sources of selectable tasks:
+1. Today's focus (morning brief + anything added this turn).
+2. New tasks captured via the "Add a task" button (these become focus).
+3. Older tasks pulled in on-demand via "Select from existing task library".
+
+### NU-1 Rework the "other" option into an "Add a task" (focus) action
+
+Status: Complete
+
+Replace the always-present "Other" checkbox + inline text field in the attribution
+picker with:
+
+1. An **"Add a task"** button at the bottom of the task list. It opens an inline card
+   (visually similar to the current "other" card): a "Task name:" label, a text
+   input beneath it, and a submit button. Submitting immediately persists a task
+   stub via `createTask` (source `attribution_capture`), adds it to the picker's
+   selectable list on the spot (checked by default), and adds it to today's focus
+   via `addTaskToDailyFocus`.
+2. A subtle **"Select from existing task library"** button (text-only, matching the
+   existing `variant="text"` styling used for "Add manually" / "Spend reward").
+   Clicking it opens a popup listing older tasks, with a **search** field to filter.
+   Selecting a task from the library adds it to the picker (checked by default) for
+   this work block, so work that got unexpected attention today can be attributed to
+   an existing task instead of spawning a near-duplicate.
+
+After the work block is saved, IF a new task was created in that turn, open a
+follow-up "Enter metadata for new task" dialog exposing the relevant metadata fields
+(area, priority, due date, description/notes). The user can submit, or choose
+"Complete later", which leaves the stub as-is (title only).
+
+Acceptance criteria:
+- The "other" checkbox is gone; new-task capture is explicit via the "Add a task"
+  button, and older tasks are reachable via the searchable "Select from existing
+  task library" popup.
+- A task created via "Add a task" appears in the picker immediately, is selectable,
+  and is added to today's focus list (so it resurfaces in later pickers).
+- The searchable library popup filters older tasks and lets the user select one.
+- The metadata dialog appears only when a new task was created that turn.
+- "Complete later" leaves the stub persisted (title only, default metadata).
+
+### NU-2 Fix: newly captured tasks never resurface in later attribution pickers
+
+Status: Complete
+
+Root cause (diagnosed 2026-08-23): `buildAttributionSelections` persists the
+"other" task via `createTask` — it is NOT lost (it lands in `tasks` with
+`source=attribution_capture` and appears in the Task vault) — but it is never added
+to the daily focus list, and `prepareAttributionSelectionState` sources the picker's
+`availableTasks` solely from `fetchDailyFocusItems` (today's focus list) plus
+`fetchTasksByIds` (only for preselected ids). So a captured task is orphaned from
+the picker and never shows up again.
+
+Fix:
+- When a new task is created during attribution, also `addTaskToDailyFocus` it so it
+  joins today's focus list and surfaces in future pickers (this is now NU-1's
+  "add to today's focus on the spot" behavior).
+- The "Select from existing task library" popup is the escape hatch for tasks that
+  are NOT in today's focus but still need attributing — this supersedes the need to
+  auto-inject `attribution_capture` tasks into `availableTasks`.
+
+Acceptance criteria:
+- A task captured via "Add a task" is selectable in the NEXT attribution dialog
+  without re-entering it (it is now in the focus list).
+- Older tasks are reachable and searchable via the library popup.
+
+---
+
 ## Phase 0 — Project Scaffold
 
 ### 0.1 Create Next.js project
@@ -460,7 +558,22 @@ Phase 6 turns the completed quiet task-management layer into a stable substrate 
 
 ### 6.1 Harden task and daily-focus status vocabularies
 
-Status: Planned
+Status: Complete
+
+Note (2026-08-23): Unified the status model. `task_status` stays
+`open | in_progress | blocked | completed | archived` (already matched the DB — no
+task migration needed). `focus_status` is now `planned | active | done | deferred | dropped`
+(added `dropped`; migrated the CHECK constraint) with a `carried_forward boolean`
+flag on `daily_focus_items` instead of a status value. Added `TASK_STATUS_LABEL` and
+`FOCUS_STATUS_LABEL` maps in `src/lib/tasks.ts`, `dropped` + `carried_forward` in
+`src/lib/types.ts`, and wired the transitions so they write the correct focus status:
+add→`active`, complete→`done`, defer→`deferred`, drop/archive→`dropped`. The spec's
+old "active/in_progress/completed/carried_forward/skipped" focus list was superseded
+by the two-vocabulary model documented in `docs/PRODUCT_SPEC.updated.md`. Verified
+with `npm run typecheck`, `npm run lint`, and `npm run build`. Migration
+`20260823000002_add_focus_status_dropped_and_carried_forward.sql` must be applied to
+the live Supabase project before this code runs (the app now writes `dropped` and
+selects `carried_forward`).
 
 Normalize the allowed values for task status, task priority, and `daily_focus_items.focus_status`.
 

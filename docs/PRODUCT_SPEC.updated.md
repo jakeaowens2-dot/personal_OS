@@ -331,6 +331,15 @@ Rules:
 - Agent-readable context belongs in compact, versioned `agent_payload_json`, not in unbounded transcript fields.
 - Optional `parent_task_id` supports lightweight `subtask -> task` relationships before project objects exist.
 
+`status` values (canonical):
+- `open` — created, no work yet.
+- `in_progress` — work has begun.
+- `blocked` — depends on another item being resolved first; a blocker surfaces to the top of focus.
+- `completed` — done.
+- `archived` — removed from active consideration (completed-for-history, or dropped/abandoned), kept in compact history.
+
+`priority` values (canonical): `critical`, `high`, `medium`, `low`.
+
 ### TaskAgentPayloadV1
 
 Versioned task-level agent context stored in `tasks.agent_payload_json`.
@@ -399,26 +408,36 @@ Fields:
 - `task_id`
 - `position`
 - `focus_status`
+- `carried_forward`
 - `note`
-- `status_reason`
-- `carried_from_focus_item_id`
-- `resolved_at`
 - `created_at`
 - `updated_at`
 
-Recommended `focus_status` values:
-- `planned`
-- `in_progress`
-- `completed`
-- `deferred`
-- `blocked`
-- `carried_forward`
-- `skipped`
+`focus_status` values (canonical):
+- `planned` — staged for a future day; the agent's buffer of the most immediate open
+  tasks. Not necessarily rendered in today's focus; surfaced at the top of the task
+  library for the user to pull in.
+- `active` — on today's focus list right now.
+- `done` — completed today; sets the task to `completed`.
+- `deferred` — moved to a future day; the task stays `open` and is re-evaluated
+  tomorrow. Rendered with orange strikethrough when shown.
+- `dropped` — abandoned; sets the task to `archived`. Rendered like `deferred`.
+
+`carried_forward` is a boolean flag (not a status) marking an item carried over from
+a prior day's plan. It renders a "lingering" badge. It is orthogonal to
+`focus_status` (an `active` item can also be carried-forward).
 
 Rules:
-- Completing or archiving from the daily surface should mutate the canonical task and create a task revision.
-- Focus status should explain what happened to the plan.
-- Carry-forward metadata should help future agents detect repeated deferrals and unresolved work.
+- Completing from the daily surface mutates the canonical task (`completed`) and sets
+  focus `done`, creating a task revision.
+- Dropping/archiving from the daily surface mutates the task (`archived`) and sets
+  focus `dropped`.
+- Deferring leaves the task `open` and sets focus `deferred`.
+- Adding to today sets focus `active`.
+- Focus status explains what happened to the plan; task status tracks the task's own
+  lifecycle. They are intentionally separate vocabularies.
+- Carry-forward metadata should help future agents detect repeated deferrals and
+  unresolved work.
 
 ### WorkBlockAttribution
 

@@ -44,7 +44,8 @@ reward block.
 - Logged duration produces work blocks = `minutes / 50` and reward at the standard rate,
   immediately.
 - **Rest duty:** after a long-flow session ends, the break timer is instantiated with
-  **10 minutes of rest per 50 minutes of work** (`rest = round(work_minutes / 50) × 10`).
+  **10 minutes of rest per 50 minutes of work**, as an exact ratio
+  (`rest = max(10, round(work_minutes × 10 / 50))`).
   This is advisory — the user may take it or skip it; it is not enforced.
 
 ## Exercise
