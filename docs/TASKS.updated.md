@@ -681,7 +681,17 @@ Verification:
 
 ### 6.5 Add daily-focus carry-forward metadata
 
-Status: Planned
+Status: Complete
+
+Note (2026-08-23): Added `status_reason text` and `carried_from_focus_item_id uuid`
+(nullable) to `daily_focus_items` via migration
+`20260823000003_add_focus_item_carry_forward_metadata.sql`. Updated
+`DailyFocusItem` type, select columns, and `updateDailyFocusItem` to handle
+`statusReason`. The transition helpers now write status reasons:
+defer→reason from caller, done→"Completed from daily focus", drop→"Dropped from
+daily focus" (or caller-provided). `carried_from_focus_item_id` support added
+for later version. Verified with `npm run lint` + `npm run typecheck` +
+`npm run build`. Migration must be applied to live Supabase.
 
 Capture why a daily focus item moved forward, was deferred, or was dropped.
 
@@ -708,7 +718,16 @@ Phase 7 creates the read-only context packet used when the user starts daily pla
 
 ### 7.1 Build planning context query helpers
 
-Status: Planned
+Status: Complete
+
+Note (2026-08-23): Created `src/lib/planning.ts` with the `buildPlanningContextPacket()`
+entry point and typed section sub-queries. The packet covers: today's focus,
+yesterday's focus, unresolved carryover, recently completed, recent attributions,
+deadline pressure (≤14 days), and backlog pressure (open count by priority).
+All queries are user-scoped; every section returns an empty array/default when data
+is absent. The `PlanningContextPacketV1` type is JSON-serializable and carries only
+IDs + short summaries, not raw DB rows. Verified with `npm run lint` + `npm run
+typecheck` + `npm run build`.
 
 Create the database retrieval layer for “let’s plan the day.”
 

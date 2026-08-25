@@ -52,6 +52,7 @@ src/
     timer.ts
     timerPalette.ts
     types.ts
+    planning.ts
   proxy.ts
 
 .gitignore

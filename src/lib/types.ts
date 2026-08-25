@@ -150,6 +150,8 @@ export type DailyFocusItem = {
   position: number;
   focus_status: DailyFocusStatus;
   carried_forward: boolean;
+  carried_from_focus_item_id: string | null;
+  status_reason: string | null;
   note: string | null;
   created_at: string;
   updated_at: string;

@@ -64,6 +64,8 @@ const DAILY_FOCUS_ITEM_SELECT_COLUMNS = [
   "position",
   "focus_status",
   "carried_forward",
+  "carried_from_focus_item_id",
+  "status_reason",
   "note",
   "created_at",
   "updated_at",
@@ -130,6 +132,7 @@ export type TaskUpdateInput = {
 export type DailyFocusItemUpdateInput = {
   focusStatus?: DailyFocusStatus;
   note?: string | null;
+  statusReason?: string | null;
 };
 
 const ACTIVE_DAILY_FOCUS_STATUSES: DailyFocusStatus[] = ["planned", "active"];
@@ -662,6 +665,10 @@ export async function updateDailyFocusItem(
     updatePayload.note = input.note?.trim() || null;
   }
 
+  if (input.statusReason !== undefined) {
+    updatePayload.status_reason = input.statusReason?.trim() || null;
+  }
+
   const { error } = await supabase
     .from("daily_focus_items")
     .update(updatePayload)
@@ -675,9 +682,11 @@ export async function updateDailyFocusItem(
 export async function removeTaskFromDailyFocus(
   supabase: SupabaseClient,
   itemId: string,
+  reason?: string,
 ) {
   return updateDailyFocusItem(supabase, itemId, {
     focusStatus: "deferred",
+    statusReason: reason?.trim() || null,
   });
 }
 
@@ -687,15 +696,18 @@ export async function completeDailyFocusItem(
 ) {
   return updateDailyFocusItem(supabase, itemId, {
     focusStatus: "done",
+    statusReason: "Completed from daily focus",
   });
 }
 
 export async function dropDailyFocusItem(
   supabase: SupabaseClient,
   itemId: string,
+  reason?: string,
 ) {
   return updateDailyFocusItem(supabase, itemId, {
     focusStatus: "dropped",
+    statusReason: reason?.trim() || "Dropped from daily focus",
   });
 }
 
