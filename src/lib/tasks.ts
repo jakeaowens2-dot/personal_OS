@@ -317,6 +317,55 @@ export async function fetchTaskRevisions(supabase: SupabaseClient, taskId: strin
   return (data ?? []) as unknown as TaskRevision[];
 }
 
+export async function fetchRecentRevisionsByUser(
+  supabase: SupabaseClient,
+  userId: string,
+  limit = 20,
+) {
+  const { data, error } = await supabase
+    .from("task_revisions")
+    .select(TASK_REVISION_SELECT_COLUMNS)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    throw new Error(enhanceTaskStorageError(toErrorMessage(error, "Could not load recent revisions."), "task"));
+  }
+
+  return (data ?? []) as unknown as TaskRevision[];
+}
+
+export async function fetchRevisionsByDateRange(
+  supabase: SupabaseClient,
+  userId: string,
+  after: string,
+  before: string,
+) {
+  const { data, error } = await supabase
+    .from("task_revisions")
+    .select(TASK_REVISION_SELECT_COLUMNS)
+    .eq("user_id", userId)
+    .gte("created_at", after)
+    .lte("created_at", before)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    throw new Error(enhanceTaskStorageError(toErrorMessage(error, "Could not load revisions by date range."), "task"));
+  }
+
+  return (data ?? []) as unknown as TaskRevision[];
+}
+
+export function splitRevisionsByActor(
+  revisions: TaskRevision[],
+): { human: TaskRevision[]; agent: TaskRevision[] } {
+  return {
+    human: revisions.filter((rev) => rev.actor_type === "human"),
+    agent: revisions.filter((rev) => rev.actor_type === "agent" || rev.actor_type === "system"),
+  };
+}
+
 export async function createTask(supabase: SupabaseClient, input: TaskCreateInput) {
   const status = input.status ?? "open";
   const statusFields = normalizeTaskStatusFields(status);
@@ -402,6 +451,26 @@ export async function completeTask(
     taskId: currentTask.id,
     userId,
   });
+}
+
+export async function fetchImmediateChildTasks(
+  supabase: SupabaseClient,
+  userId: string,
+  parentTaskId: string,
+) {
+  const { data, error } = await supabase
+    .from("tasks")
+    .select(TASK_SELECT_COLUMNS)
+    .eq("user_id", userId)
+    .eq("parent_task_id", parentTaskId)
+    .neq("status", "archived")
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw new Error(enhanceTaskStorageError(toErrorMessage(error, "Could not load child tasks."), "task"));
+  }
+
+  return sortTasks((data ?? []) as unknown as Task[]);
 }
 
 export async function archiveTask(

@@ -53,6 +53,7 @@ src/
     timerPalette.ts
     types.ts
     planning.ts
+    agentPayload.ts
   proxy.ts
 
 .gitignore

@@ -15,8 +15,10 @@ import {
   createTask,
   dropDailyFocusItem,
   fetchDailyFocusItems,
+  fetchImmediateChildTasks,
   fetchTaskRevisions,
   fetchTasks,
+  fetchTasksByIds,
   moveDailyFocusItem,
   removeTaskFromDailyFocus,
   restoreTask,
@@ -157,6 +159,8 @@ export default function TaskSettingsPage() {
     () => dailyFocusItems.find((item) => item.task_id === selectedTaskId) ?? null,
     [dailyFocusItems, selectedTaskId],
   );
+  const [parentTask, setParentTask] = useState<Task | null>(null);
+  const [childTasks, setChildTasks] = useState<Task[]>([]);
 
   const handleSelectTask = useCallback(async (task: Task, userId: string | null) => {
     setSelectedTaskId(task.id);
@@ -169,6 +173,16 @@ export default function TaskSettingsPage() {
 
     const revisions = await fetchTaskRevisions(supabase!, task.id, userId);
     setTaskRevisions(revisions);
+
+    if (task.parent_task_id) {
+      const parents = await fetchTasksByIds(supabase!, userId, [task.parent_task_id]);
+      setParentTask(parents[0] ?? null);
+    } else {
+      setParentTask(null);
+    }
+
+    const children = await fetchImmediateChildTasks(supabase!, userId, task.id);
+    setChildTasks(children);
   }, [supabase]);
 
   const loadTasksForUser = useCallback(async (userId: string, preferredTaskId?: string | null) => {
@@ -857,6 +871,32 @@ export default function TaskSettingsPage() {
                 <p className="text-sm text-slate-500">Choose a task on the left to edit it.</p>
               ) : (
                 <div className="space-y-5">
+                  {parentTask ? (
+                    <div className="rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Parent task</p>
+                      <p className="mt-1 text-sm font-medium text-slate-950">{parentTask.title}</p>
+                    </div>
+                  ) : null}
+                  {childTasks.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-500">
+                        Subtasks ({childTasks.length})
+                      </p>
+                      <div className="space-y-1">
+                        {childTasks.map((child) => (
+                          <button
+                            key={child.id}
+                            className="flex w-full items-center justify-between rounded-[0.6rem] px-2 py-1.5 text-left transition hover:bg-slate-100"
+                            onClick={() => void handleSelectTask(child, workspaceUserId)}
+                            type="button"
+                          >
+                            <span className="truncate text-sm text-slate-700">{child.title}</span>
+                            <span className="shrink-0 text-xs text-[var(--accent)]">View</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="grid gap-4 md:grid-cols-2">
                     <TaskField label="Title">
                       <input

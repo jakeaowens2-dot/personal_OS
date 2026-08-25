@@ -599,7 +599,15 @@ Verification:
 
 ### 6.2 Add task relationship support for lightweight subtasks
 
-Status: Planned
+Status: Complete
+
+Note (2026-08-23): `parent_task_id` already existed in the schema and types. Added
+an index (`tasks_user_id_parent_task_id_idx`) via migration
+`20260823000004`, a `fetchImmediateChildTasks` helper in `src/lib/tasks.ts`, and a
+parent task + child subtask display section in the task settings page (shows the
+parent as a read-only badge, subtasks as a clickable list). No cyclic-hierarchy
+prevention beyond existing self-parent avoidance in the UI. Verified with `npm run
+lint` + `npm run typecheck` + `npm run build`.
 
 Add optional task-to-task hierarchy support so the system can model `subtask -> task` without introducing full project objects yet.
 
@@ -625,7 +633,15 @@ Verification:
 
 ### 6.3 Define `agent_payload_json` schema v1
 
-Status: Planned
+Status: Complete
+
+Note (2026-08-23): Created `src/lib/agentPayload.ts` with `TaskAgentPayloadV1` type
+(fields: schema_version, summary, context, next_action, known_blockers,
+source_notes, tags, estimated_remaining_blocks, last_agent_reviewed_at), a
+`parseAgentPayloadV1` helper that tolerates null/malformed/older payloads and falls
+back to a default empty v1, and `createAgentPayloadV1` for new payloads. No UI
+changes — this is the data contract layer only. Verified with `npm run lint` + `npm
+run typecheck` + `npm run build`.
 
 Turn `agent_payload_json` from a loose JSON field into a documented, versioned agent-readable context object.
 
@@ -658,7 +674,13 @@ Verification:
 
 ### 6.4 Add task revision query helpers
 
-Status: Planned
+Status: Complete
+
+Note (2026-08-23): Added `fetchRecentRevisionsByUser` (by user, limit N),
+`fetchRevisionsByDateRange` (by [after, before]), and `splitRevisionsByActor`
+(human vs agent/system) to `src/lib/tasks.ts`. The settings page already had a
+revision history display for selected tasks. Verified with `npm run lint` + `npm run
+typecheck` + `npm run build`.
 
 Make durable task history easy for future agents to retrieve without hand-writing ad hoc queries.
 
