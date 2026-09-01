@@ -795,6 +795,12 @@ export default function TaskSettingsPage() {
               >
                 Back home
               </Link>
+              <Link
+                className="text-sm text-slate-600 underline-offset-4 transition hover:text-slate-900 hover:underline"
+                href="/projects/safety-evidence"
+              >
+                Project fieldbook
+              </Link>
               {workspaceUserId ? (
                 <button
                   className="text-sm text-slate-600 underline-offset-4 transition hover:text-slate-900 hover:underline"

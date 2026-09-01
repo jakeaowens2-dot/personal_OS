@@ -14,6 +14,11 @@ src/
     globals.css
     layout.tsx
     page.tsx
+    task-tracker/
+      page.tsx
+    projects/
+      safety-evidence/
+        page.tsx
     settings/
       tasks/
         page.tsx
@@ -51,6 +56,7 @@ src/
     workspace.ts
     timer.ts
     timerPalette.ts
+    projectTrackers.ts
     types.ts
     planning.ts
     agentPayload.ts
@@ -79,6 +85,7 @@ supabase/
     20260528103000_add_ledger_event_correction_fields.sql
     20260823000000_add_work_block_attribution_delete_policy.sql
     20260823000001_add_behavior_events.sql
+    20260830000000_add_project_tracker.sql
 ```
 
 ## Planned Structure
@@ -225,6 +232,7 @@ Current files:
 - `supabase/migrations/20260528001500_add_tasks_and_revisions.sql` adds canonical tasks plus durable task revision history.
 - `supabase/migrations/20260528011500_add_daily_focus.sql` adds the lightweight daily focus list that references canonical tasks.
 - `supabase/migrations/20260528023000_add_work_block_attributions.sql` adds durable per-task work-block attribution for post-completion task assignment.
+- `supabase/migrations/20260830000000_add_project_tracker.sql` adds user-scoped project checklists and submitted deliverables.
 - `supabase/migrations/20260528103000_add_ledger_event_correction_fields.sql` adds soft-delete audit fields for ledger-linked records and update access for attribution corrections.
 
 Planned files:
@@ -246,6 +254,8 @@ Current files:
 - `src/app/page.tsx`
 - `src/app/globals.css`
 - `src/app/settings/tasks/page.tsx` is the quiet task vault for creating, editing, completing, archiving, and auditing canonical tasks.
+- `src/app/projects/safety-evidence/page.tsx` is the project fieldbook: a deliberate submit-to-complete checklist with saved deliverables, outline import, and local in-memory preview mode.
+- `src/app/task-tracker/page.tsx` redirects to the local-only fieldbook preview for fast UI iteration.
 - `src/app/page.tsx` now also shows the compact daily focus list and links back to the task vault for management.
 
 Architecture note:

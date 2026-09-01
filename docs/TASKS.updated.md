@@ -9,6 +9,12 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Side module — Project fieldbook (2026-08-30)
+
+Status: Complete
+
+Note: Added `/projects/safety-evidence`, a user-scoped project deliverable tracker seeded with the intersection-evidence launch plan. It classifies each deliverable by appropriate input shape, requires explicit submission before completion, stores submissions in Supabase, and imports future bulleted project outlines. `/task-tracker` opens a local in-memory preview for rapid iteration without sign-in or saved-data changes. Verified with `npm run typecheck`, `npm run lint`, and `npm run build`.
+
 ## Next Up (2026-08-23) — Task attribution: "add a new task" + picker fix
 
 Status: Complete (NU-1 + NU-2)

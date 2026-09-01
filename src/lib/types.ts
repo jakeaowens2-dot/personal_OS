@@ -112,6 +112,36 @@ export type Task = {
   updated_at: string;
 };
 
+export type ProjectTrackerInputKind = "short_text" | "long_text" | "link" | "list";
+
+export type ProjectTracker = {
+  id: string;
+  user_id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectTrackerItem = {
+  id: string;
+  tracker_id: string;
+  user_id: string;
+  phase: string;
+  position: number;
+  title: string;
+  description: string | null;
+  input_kind: ProjectTrackerInputKind;
+  input_label: string;
+  input_placeholder: string | null;
+  submission: string | null;
+  submitted_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type TaskRevisionActionType =
   | "created"
   | "updated"
