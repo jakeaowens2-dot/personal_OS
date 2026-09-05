@@ -51,9 +51,9 @@ export const penaltyPalette = {
   border: "#7C3AED",
 } as const;
 
-// "Destroyed reward blocks": greyed-out blue with a purple border + purple X overlay.
+// Penalty consequence treatment overlaid on earned reward blocks.
 export const destroyedRewardPalette = {
-  fill: "#C7D2E8",
+  overlay: "rgba(241, 238, 246, 0.72)",
   border: "#7C3AED",
   mark: "#7C3AED",
 } as const;

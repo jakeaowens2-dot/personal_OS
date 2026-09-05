@@ -5,8 +5,10 @@ type MiniBlocksProps = {
   minutes: number;
   minutesPerBlock: number;
   color: string;
+  destroyedMinutes?: number;
   lightColor?: string;
-  variant?: "solid" | "outline" | "destroyed";
+  layout?: "contents" | "inline" | "two-column";
+  variant?: "solid" | "outline";
   maxBlocks?: number;
   fillMinutes?: number;
 };
@@ -17,7 +19,9 @@ export function MiniBlocks({
   minutes,
   minutesPerBlock,
   color,
+  destroyedMinutes = 0,
   lightColor,
+  layout = "inline",
   variant = "solid",
   maxBlocks = 18,
   fillMinutes = 0,
@@ -89,7 +93,7 @@ export function MiniBlocks({
     );
   }
 
-  // --- Solid & destroyed variants ----------------------------------------------
+  // --- Solid blocks -------------------------------------------------------------
   const { fullBlocks, partialRatio } = decomposeMinutes(minutes, minutesPerBlock);
   const hasPartial = partialRatio > 0;
   const totalBlocks = fullBlocks + (hasPartial ? 1 : 0);
@@ -98,44 +102,37 @@ export function MiniBlocks({
     return null;
   }
 
-  const rendered: Array<"full" | "partial"> = [];
+  const rendered: Array<{ kind: "full" | "partial"; destroyed: boolean }> = [];
   for (let i = 0; i < fullBlocks && rendered.length < maxBlocks; i++) {
-    rendered.push("full");
+    rendered.push({
+      kind: "full",
+      destroyed: destroyedMinutes > i * minutesPerBlock,
+    });
   }
   if (hasPartial && rendered.length < maxBlocks) {
-    rendered.push("partial");
+    rendered.push({
+      kind: "partial",
+      destroyed: destroyedMinutes > fullBlocks * minutesPerBlock,
+    });
   }
   const overflow = totalBlocks - rendered.length;
 
   const light = lightColor ?? `${color}40`;
 
   return (
-    <span className="inline-flex flex-wrap items-center gap-[2px]">
-      {rendered.map((kind, index) => {
-        const groupBoundary = index > 0 && index % 3 === 0;
+    <span
+      className={
+        layout === "contents"
+          ? "contents"
+          : layout === "two-column"
+          ? "inline-grid grid-cols-2 gap-[2px]"
+          : "inline-flex flex-wrap items-center gap-[2px]"
+      }
+    >
+      {rendered.map(({ kind, destroyed }, index) => {
+        const groupBoundary = layout === "inline" && index > 0 && index % 3 === 0;
         const spacing = groupBoundary ? "ml-[9px]" : "";
         const base = "relative inline-flex h-[15px] w-[15px] overflow-hidden rounded-[2px]";
-
-        if (variant === "destroyed") {
-          return (
-            <span
-              key={index}
-              className={`${base} items-center justify-center ${spacing}`}
-              style={{
-                backgroundColor: destroyedRewardPalette.fill,
-                boxShadow: `inset 0 0 0 1px ${destroyedRewardPalette.border}`,
-              }}
-            >
-              <span
-                aria-hidden="true"
-                className="text-[10px] font-bold leading-none"
-                style={{ color: destroyedRewardPalette.mark }}
-              >
-                ✕
-              </span>
-            </span>
-          );
-        }
 
         return (
           <span
@@ -148,6 +145,24 @@ export function MiniBlocks({
                 className="absolute inset-y-0 left-0"
                 style={{ backgroundColor: color, width: `${partialRatio * 100}%` }}
               />
+            ) : null}
+            {destroyed ? (
+              <span
+                aria-label="Reward wiped out by penalty"
+                className="absolute inset-0 flex items-center justify-center"
+                style={{
+                  backgroundColor: destroyedRewardPalette.overlay,
+                  boxShadow: `inset 0 0 0 1px ${destroyedRewardPalette.border}`,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  className="text-[10px] font-bold leading-none"
+                  style={{ color: destroyedRewardPalette.mark }}
+                >
+                  ✕
+                </span>
+              </span>
             ) : null}
           </span>
         );

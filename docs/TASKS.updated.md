@@ -9,6 +9,18 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Release (2026-09-05) — Effective-dated economy and weekly ledger UI
+
+Status: Complete
+
+Updated new events to the 50-minute work / 10-minute rest / 15-minute reward policy,
+with a 1.5x weekend rate and 1:1 screen-time penalties. The September 5 rollout is
+effective-dated, so earlier work retains the 20/30-minute reward rates and existing
+penalties and spending are not repriced. Added daily weekly-overview columns, direct
+penalty overlays on earned reward blocks, and a progressively loaded `/history` route.
+Minute labels render as whole numbers while accounting retains fractional precision.
+Verified with lint, typecheck, and a production build.
+
 ## Next Up (2026-08-23) — Task attribution: "add a new task" + picker fix
 
 Status: Complete (NU-1 + NU-2)

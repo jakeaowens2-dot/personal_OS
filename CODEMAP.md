@@ -12,6 +12,8 @@ Update this file whenever important files or directories are added, moved, delet
 src/
   app/
     globals.css
+    history/
+      page.tsx
     layout.tsx
     page.tsx
     settings/
@@ -42,6 +44,7 @@ src/
     behaviors.ts
     cn.ts
     economy.ts
+    history.ts
     ledger.ts
     tasks.ts
     supabase/
@@ -79,6 +82,7 @@ supabase/
     20260528103000_add_ledger_event_correction_fields.sql
     20260823000000_add_work_block_attribution_delete_policy.sql
     20260823000001_add_behavior_events.sql
+    20260905000000_update_screen_time_penalty_economy.sql
 ```
 
 ## Planned Structure
@@ -159,6 +163,7 @@ Current files:
 
 Current files:
 - `src/lib/ledger.ts`
+- `src/lib/history.ts` pages merged ledger and behavior history using timestamp cursors.
 - `src/lib/workspace.ts` handles Supabase-backed workspace session bootstrap, loading, and completion persistence.
 - `src/lib/workspace.ts` also persists post-completion work-block attribution and updates ledger metadata with readable task summaries.
 - `src/components/ledger/LedgerEventList.tsx` now exposes recent-activity edit/delete actions for supported ledger events.
@@ -167,7 +172,7 @@ Planned files:
 - `src/lib/ledger.ts`
 - `src/components/ledger/LedgerEventList.tsx`
 - `src/components/ledger/WorkBlockStats.tsx`
-- The compact ledger experience lives on `src/app/page.tsx` during MVP; a dedicated history route can be added later when deeper browsing is needed.
+- `src/app/page.tsx` shows compact recent activity; `src/app/history/page.tsx` provides the complete, progressively loaded history.
 
 ### Rewards
 
@@ -190,8 +195,8 @@ Current file:
 
 Current files:
 - `src/lib/behaviors.ts` holds behavior events (indulgence, screen time, exercise) and their reward/penalty math, plus edit/delete persistence.
-- `src/components/overview/MiniBlocks.tsx` renders 1-hour blocks with partial-fill support and solid/outline/destroyed variants.
-- `src/components/overview/WeeklyOverview.tsx` renders the weekly Work / Reward / Penalty sections plus destroyed reward blocks.
+- `src/components/overview/MiniBlocks.tsx` renders 1-hour blocks with partial-fill support and consequence overlays.
+- `src/components/overview/WeeklyOverview.tsx` renders daily Work / Reward / Penalty columns with two-wide block groups.
 - `src/app/page.tsx` hosts the "Behavior tracking" dialog and mixes behavior events into reward accounting.
 
 Task storage files:

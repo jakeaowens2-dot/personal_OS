@@ -1,12 +1,9 @@
 import { Badge } from "@/components/ui/Badge";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { getBehaviorTypeLabel } from "@/lib/behaviors";
+import type { ActivityItem } from "@/lib/history";
 import { exercisePalette, penaltyPalette, rewardPalette, timerPalette } from "@/lib/timerPalette";
 import type { BehaviorEvent, LedgerEvent } from "@/lib/types";
-
-export type ActivityItem =
-  | { kind: "ledger"; event: LedgerEvent }
-  | { kind: "behavior"; event: BehaviorEvent };
 
 type LedgerEventListProps = {
   emptyMessage: string;

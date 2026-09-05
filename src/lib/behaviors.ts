@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { usesEconomyPolicyV2 } from "@/lib/economy";
 import type { BehaviorEvent, BehaviorType } from "@/lib/types";
 
 export const INDULGENCE_PENALTY_MINUTES = 60;
-export const SCREEN_TIME_DAILY_ALLOWANCE_MINUTES = 60;
 
 const BEHAVIOR_SELECT_COLUMNS = [
   "id",
@@ -29,18 +29,27 @@ export function getBehaviorTypeLabel(behaviorType: BehaviorType) {
   }
 }
 
-// Screen time is penalized at 50% up to a 1-hour daily allowance, then at 100% beyond it.
-// Examples (minutes): 60 -> 30, 120 -> 60, 150 -> 90.
-export function computeScreenTimePenalty(screenTimeMinutes: number) {
-  return Math.max(0.5 * screenTimeMinutes, screenTimeMinutes - SCREEN_TIME_DAILY_ALLOWANCE_MINUTES);
+export function computeScreenTimePenalty(
+  screenTimeMinutes: number,
+  occurredAt = new Date().toISOString(),
+) {
+  if (!usesEconomyPolicyV2(occurredAt)) {
+    return Math.max(0.5 * screenTimeMinutes, screenTimeMinutes - 60);
+  }
+
+  return Math.max(0, screenTimeMinutes);
 }
 
-export function computeBehaviorPenalty(behaviorType: BehaviorType, durationMinutes: number | null) {
+export function computeBehaviorPenalty(
+  behaviorType: BehaviorType,
+  durationMinutes: number | null,
+  occurredAt?: string,
+) {
   switch (behaviorType) {
     case "indulgence":
       return INDULGENCE_PENALTY_MINUTES;
     case "screen_time":
-      return computeScreenTimePenalty(durationMinutes ?? 0);
+      return computeScreenTimePenalty(durationMinutes ?? 0, occurredAt);
     case "exercise":
       return 0;
   }
@@ -55,7 +64,12 @@ export type BehaviorEntryInput = {
 };
 
 export async function persistBehaviorEvent(supabase: SupabaseClient, input: BehaviorEntryInput) {
-  const penaltyMinutes = computeBehaviorPenalty(input.behaviorType, input.durationMinutes ?? null);
+  const occurredAt = input.occurredAt ?? new Date().toISOString();
+  const penaltyMinutes = computeBehaviorPenalty(
+    input.behaviorType,
+    input.durationMinutes ?? null,
+    occurredAt,
+  );
   const durationMinutes =
     input.behaviorType === "exercise" || input.behaviorType === "screen_time"
       ? input.durationMinutes ?? null
@@ -66,7 +80,7 @@ export async function persistBehaviorEvent(supabase: SupabaseClient, input: Beha
     .insert({
       user_id: input.userId,
       behavior_type: input.behaviorType,
-      occurred_at: input.occurredAt ?? new Date().toISOString(),
+      occurred_at: occurredAt,
       duration_minutes: durationMinutes,
       penalty_minutes: penaltyMinutes,
       note: input.note?.trim() || null,
@@ -85,7 +99,11 @@ export async function updateBehaviorEvent(
   supabase: SupabaseClient,
   input: BehaviorEntryInput & { eventId: string },
 ) {
-  const penaltyMinutes = computeBehaviorPenalty(input.behaviorType, input.durationMinutes ?? null);
+  const penaltyMinutes = computeBehaviorPenalty(
+    input.behaviorType,
+    input.durationMinutes ?? null,
+    input.occurredAt,
+  );
   const durationMinutes =
     input.behaviorType === "exercise" || input.behaviorType === "screen_time"
       ? input.durationMinutes ?? null

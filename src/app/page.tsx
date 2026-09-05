@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 import { EmailAuthPanel, type EmailAuthPanelState } from "@/components/auth/EmailAuthPanel";
-import { LedgerEventList, type ActivityItem } from "@/components/ledger/LedgerEventList";
+import { LedgerEventList } from "@/components/ledger/LedgerEventList";
 import { MiniBlocks } from "@/components/overview/MiniBlocks";
 import { OverviewModule } from "@/components/overview/OverviewModule";
 import { WeeklyOverview } from "@/components/overview/WeeklyOverview";
@@ -27,17 +27,17 @@ import {
 import { getModeDurationMinutes } from "@/lib/timer";
 import {
   behaviorEventsToSettlementEvents,
+  buildWeeklyEconomyDays,
   computeSettlement,
-  getWorkDurationMinutes,
   isWeekendDate,
   ledgerEventsToSettlementEvents,
   REWARD_BLOCK_MINUTES,
   restMinutesForWorkMinutes,
-  rewardMinutesForWorkMinutes,
   WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK,
   WEEKEND_REWARD_MULTIPLIER_LABEL,
   WORK_BLOCK_WORK_MINUTES,
 } from "@/lib/economy";
+import type { ActivityItem } from "@/lib/history";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   addTaskToDailyFocus,
@@ -185,12 +185,6 @@ function shiftWeeks(date: Date, weeks: number) {
   const shifted = new Date(date);
   shifted.setDate(shifted.getDate() + weeks * 7);
   return shifted;
-}
-
-function isWithinWeek(isoTimestamp: string, weekStart: Date) {
-  const date = new Date(isoTimestamp);
-  const weekEnd = shiftWeeks(weekStart, 1);
-  return date >= weekStart && date < weekEnd;
 }
 
 function formatWeekRangeLabel(weekStart: Date) {
@@ -653,52 +647,14 @@ export default function HomePage() {
     return formatWeekRangeLabel(weeklyWeekStart);
   }, [weekOffset, weeklyWeekStart]);
 
-  const weeklyWorkBlocks = useMemo(
-    () => dedupedWorkBlocks.filter((workBlock) => isWithinWeek(workBlock.earned_at, weeklyWeekStart)),
-    [dedupedWorkBlocks, weeklyWeekStart],
-  );
-
-  const weeklyRewardWorkMinutes = useMemo(
-    () =>
-      dedupedLedgerEvents
-        .filter(
-          (event) => event.event_type === "work_earned" && isWithinWeek(event.created_at, weeklyWeekStart),
-        )
-        .reduce(
-          (total, event) =>
-            total +
-            rewardMinutesForWorkMinutes(
-              getWorkDurationMinutes(event),
-              isWeekendDate(event.created_at),
-            ),
-          0,
-        ),
-    [dedupedLedgerEvents, weeklyWeekStart],
-  );
-
-  const weeklyWorkMinutes = useMemo(
-    () => weeklyWorkBlocks.reduce((total, workBlock) => total + workBlock.duration_minutes, 0),
-    [weeklyWorkBlocks],
-  );
-
-  const weeklyExerciseMinutes = useMemo(
-    () =>
-      behaviorEvents
-        .filter(
-          (event) => event.behavior_type === "exercise" && isWithinWeek(event.occurred_at, weeklyWeekStart),
-        )
-        .reduce((total, event) => total + (event.duration_minutes ?? 0), 0),
-    [behaviorEvents, weeklyWeekStart],
-  );
-
-  const weeklyPenaltyMinutes = useMemo(
-    () =>
-      behaviorEvents
-        .filter(
-          (event) => event.behavior_type !== "exercise" && isWithinWeek(event.occurred_at, weeklyWeekStart),
-        )
-        .reduce((total, event) => total + (event.penalty_minutes ?? 0), 0),
-    [behaviorEvents, weeklyWeekStart],
+  const weeklyDays = useMemo(
+    () => buildWeeklyEconomyDays({
+      behaviorEvents,
+      ledgerEvents: dedupedLedgerEvents,
+      weekStart: weeklyWeekStart,
+      workBlocks: dedupedWorkBlocks,
+    }),
+    [behaviorEvents, dedupedLedgerEvents, dedupedWorkBlocks, weeklyWeekStart],
   );
 
   const recentActivityItems = useMemo(
@@ -2228,7 +2184,8 @@ export default function HomePage() {
         </section>
 
         <section className="grid gap-6 pt-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_22rem] lg:items-start">
-          <section className="lg:col-span-2 rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
+          <div className="space-y-6 lg:col-span-2">
+          <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
             <div className="grid gap-8 md:grid-cols-2 md:gap-0">
               <OverviewModule
                 action={
@@ -2353,19 +2310,25 @@ export default function HomePage() {
                 </div>
               }
               body={
-                <WeeklyOverview
-                  exerciseMinutes={weeklyExerciseMinutes}
-                  penaltyMinutes={weeklyPenaltyMinutes}
-                  rewardWorkMinutes={weeklyRewardWorkMinutes}
-                  workMinutes={weeklyWorkMinutes}
-                />
+                <WeeklyOverview days={weeklyDays} />
               }
               title="Weekly overview"
             />
           </section>
+          </div>
 
           <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)] lg:col-start-3">
             <OverviewModule
+              action={
+                <Link
+                  className="text-sm text-slate-500 transition hover:text-slate-900"
+                  href="/history"
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Full history ↗
+                </Link>
+              }
               body={
                 <LedgerEventList
                   emptyMessage="Finish a work timer to create your first saved ledger event."
@@ -2746,7 +2709,12 @@ export default function HomePage() {
               {behaviorDialogState.screenTimeMinutes ? (
                 <p className="text-sm text-slate-500">
                   Penalty:{" "}
-                  {computeScreenTimePenalty(Number.parseInt(behaviorDialogState.screenTimeMinutes, 10) || 0)}{" "}
+                  {computeScreenTimePenalty(
+                    Number.parseInt(behaviorDialogState.screenTimeMinutes, 10) || 0,
+                    behaviorDialogState.screenTimeDate
+                      ? new Date(`${behaviorDialogState.screenTimeDate}T12:00:00`).toISOString()
+                      : undefined,
+                  )}{" "}
                   minutes
                 </p>
               ) : null}

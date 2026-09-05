@@ -25,14 +25,15 @@ the hour actually present).
 
 - **1 reward block = 60 minutes of reward time** (1 hour).
 - Reward earning rate (per work block, i.e. per 50 min of focused work):
-  - **Weekday: 20 reward minutes** per work block.
-  - **Weekend: 30 reward minutes** per work block (1.5x).
+  - **Weekday: 15 reward minutes** per work block.
+  - **Weekend: 22.5 reward minutes** per work block (1.5x).
 - `reward_minutes_earned = work_blocks × rate`.
+- This policy is effective September 5, 2026 at midnight Central time. Earlier work
+  retains the former 20-minute weekday / 30-minute weekend rate.
 
-Consequence: 1 full reward block (60 min) requires 3 work blocks on weekdays (3 × 20)
-or 2 work blocks on weekends (2 × 30). This is why work blocks must NOT render as full
-reward blocks — a single 50-min work block earns only ⅓ (weekday) or ½ (weekend) of a
-reward block.
+Consequence: 1 full reward block (60 min) requires 4 work blocks on weekdays. Weekend
+work earns the same reward 1.5 times faster. Work blocks must NOT render as full reward
+blocks — a single 50-minute work block earns ¼ of a weekday reward block.
 
 ## Long-flow (rolling) sessions
 
@@ -56,8 +57,8 @@ reward block.
 ## Penalties (indulgence + screen time)
 
 - Indulgent behavior: flat **−60 minutes** (1 penalty block).
-- Screen time: `penalty = max(0.5 × screen_minutes, screen_minutes − 60)`.
-  (60 → 30, 120 → 60, 150 → 90.)
+- Screen time is penalized **1:1** for events on or after the September 5, 2026 policy
+  rollout. Earlier recorded events retain the policy under which they occurred.
 - Penalties render as **purple** blocks and are a **senior claim** on reward: they are
   paid down before anything else.
 
@@ -92,17 +93,18 @@ Net balance = `credit − penalty − spent`.
 
 ### "Destroyed" reward blocks (weekly overview only)
 
-Reward that a penalty consumed is shown in the weekly overview as **destroyed reward
-blocks**: greyed-out blue fill, purple border, purple ✕ overlay. Amount =
-`min(weekly_penalty, weekly_reward_total)`.
+Reward that a penalty consumed is shown in the weekly overview by overlaying a purple
+border and ✕ directly on the reward block it wiped out. It does not create an additional
+block. Destruction is allocated within each day and capped at that day's earned reward.
 
 ## Weekly overview
 
-Three sections, each with a block count and a total-hours label:
+Three category rows share a seven-day column grid. Each day renders its blocks in a
+two-column reading order and shows a quiet daily time total beneath the group:
 
 - **Work** — red blocks; total work minutes (blocks = minutes / 50).
-- **Reward** — blue (work reward) + periwinkle (exercise) + destroyed (grey/✕) blocks;
-  shows `total:` and `net:` (net = total − penalty).
+- **Reward** — blue (work reward) + periwinkle (exercise), with destroyed reward marked
+  directly on the underlying block; net = total − penalty.
 - **Penalty** — purple blocks; total penalty minutes.
 
 ## Reference rates (constants in `src/lib/economy.ts`)
@@ -112,5 +114,8 @@ Three sections, each with a block count and a total-hours label:
 | `WORK_BLOCK_WORK_MINUTES` | 50 | focused minutes per work block |
 | `WORK_BLOCK_REST_MINUTES` | 10 | implied rest minutes per work block |
 | `REWARD_BLOCK_MINUTES` | 60 | reward minutes per reward block |
-| `WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK` | 20 | weekday reward rate |
-| `WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK` | 30 | weekend reward rate (1.5x) |
+| `ECONOMY_POLICY_V2_EFFECTIVE_AT` | 2026-09-05 midnight CT | new-policy boundary |
+| `LEGACY_WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK` | 20 | pre-rollout weekday rate |
+| `LEGACY_WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK` | 30 | pre-rollout weekend rate |
+| `WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK` | 15 | weekday reward rate |
+| `WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK` | 22.5 | weekend reward rate (1.5x) |
