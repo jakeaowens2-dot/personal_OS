@@ -126,6 +126,7 @@ type BehaviorDialogState = {
   screenTimeMinutes: string;
   screenTimeDate: string;
   exerciseMinutes: string;
+  exerciseDate: string;
   note: string;
 };
 
@@ -134,6 +135,7 @@ const INITIAL_BEHAVIOR_DIALOG_STATE: BehaviorDialogState = {
   screenTimeMinutes: "",
   screenTimeDate: "",
   exerciseMinutes: "",
+  exerciseDate: "",
   note: "",
 };
 
@@ -1357,6 +1359,10 @@ export default function HomePage() {
       }
 
       durationMinutes = workoutMinutes;
+
+      if (behaviorDialogState.exerciseDate) {
+        occurredAt = new Date(`${behaviorDialogState.exerciseDate}T12:00:00`).toISOString();
+      }
     }
 
     setPersistenceState({
@@ -1408,6 +1414,7 @@ export default function HomePage() {
         event.behavior_type === "screen_time" ? String(event.duration_minutes ?? "") : "",
       screenTimeDate: event.behavior_type === "screen_time" ? toDateInputValue(event.occurred_at) : "",
       exerciseMinutes: event.behavior_type === "exercise" ? String(event.duration_minutes ?? "") : "",
+      exerciseDate: event.behavior_type === "exercise" ? toDateInputValue(event.occurred_at) : "",
       note: event.note ?? "",
     });
     setIsBehaviorDialogOpen(true);
@@ -2722,16 +2729,26 @@ export default function HomePage() {
           ) : null}
 
           {behaviorDialogState.behaviorType === "exercise" ? (
-            <ActionField
-              label="Workout length (minutes)"
-              inputMode="numeric"
-              min="1"
-              onChange={(event) =>
-                setBehaviorDialogState((current) => ({ ...current, exerciseMinutes: event.target.value }))
-              }
-              type="number"
-              value={behaviorDialogState.exerciseMinutes}
-            />
+            <div className="space-y-3">
+              <ActionField
+                label="Day"
+                onChange={(event) =>
+                  setBehaviorDialogState((current) => ({ ...current, exerciseDate: event.target.value }))
+                }
+                type="date"
+                value={behaviorDialogState.exerciseDate}
+              />
+              <ActionField
+                label="Workout length (minutes)"
+                inputMode="numeric"
+                min="1"
+                onChange={(event) =>
+                  setBehaviorDialogState((current) => ({ ...current, exerciseMinutes: event.target.value }))
+                }
+                type="number"
+                value={behaviorDialogState.exerciseMinutes}
+              />
+            </div>
           ) : null}
 
           <ActionField
