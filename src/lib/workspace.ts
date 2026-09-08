@@ -25,11 +25,26 @@ type PersistCompletionInput = {
 };
 
 type PersistManualWorkBlockInput = {
+  artifactIds?: ManualWorkArtifactIds;
   completedAt: string;
   durationMinutes: number;
   note?: string;
   userId: string;
 };
+
+export type ManualWorkArtifactIds = {
+  ledgerEventId: string;
+  timerSessionId: string;
+  workBlockId: string;
+};
+
+export function createManualWorkArtifactIds(): ManualWorkArtifactIds {
+  return {
+    ledgerEventId: crypto.randomUUID(),
+    timerSessionId: crypto.randomUUID(),
+    workBlockId: crypto.randomUUID(),
+  };
+}
 
 type PersistRewardSpendInput = {
   costWorkBlocks: number;
@@ -46,6 +61,7 @@ type WorkBlockAttributionSelection = {
 };
 
 type PersistWorkBlockAttributionsInput = {
+  attributionIds?: string[];
   durationMinutes: number;
   ledgerEvent: LedgerEvent;
   note?: string;
@@ -226,11 +242,11 @@ export async function persistCompletedWorkSession(
 
 export async function persistManualWorkBlock(
   supabase: SupabaseClient,
-  { completedAt, durationMinutes, note, userId }: PersistManualWorkBlockInput,
+  { artifactIds = createManualWorkArtifactIds(), completedAt, durationMinutes, note, userId }: PersistManualWorkBlockInput,
 ) {
   const endedAt = completedAt;
   const startedAt = new Date(new Date(completedAt).getTime() - durationMinutes * 60 * 1000).toISOString();
-  const timerSessionId = crypto.randomUUID();
+  const timerSessionId = artifactIds.timerSessionId;
 
   const timerSession: TimerSession = {
     id: timerSessionId,
@@ -245,7 +261,7 @@ export async function persistManualWorkBlock(
   };
 
   const workBlock: WorkBlock = {
-    id: crypto.randomUUID(),
+    id: artifactIds.workBlockId,
     user_id: userId,
     timer_session_id: timerSessionId,
     earned_at: endedAt,
@@ -255,7 +271,7 @@ export async function persistManualWorkBlock(
   };
 
   const ledgerEvent: LedgerEvent = {
-    id: crypto.randomUUID(),
+    id: artifactIds.ledgerEventId,
     user_id: userId,
     event_type: "work_earned",
     delta_work_blocks: workBlockDeltaForDuration(durationMinutes),
@@ -467,7 +483,7 @@ async function softDeleteAttributionsForWorkBlock(
 
 export async function persistWorkBlockAttributions(
   supabase: SupabaseClient,
-  { durationMinutes, ledgerEvent, note, selections, userId, workBlockId }: PersistWorkBlockAttributionsInput,
+  { attributionIds, durationMinutes, ledgerEvent, note, selections, userId, workBlockId }: PersistWorkBlockAttributionsInput,
 ) {
   const shareCount = selections.length;
 
@@ -475,11 +491,15 @@ export async function persistWorkBlockAttributions(
     throw new Error("Choose at least one task or category for this work block.");
   }
 
+  if (attributionIds && attributionIds.length !== shareCount) {
+    throw new Error("Work attribution identifiers do not match the selected tasks.");
+  }
+
   const baseMinutes = Math.floor(durationMinutes / shareCount);
   const remainderMinutes = durationMinutes % shareCount;
 
   const attributions: WorkBlockAttribution[] = selections.map((selection, index) => ({
-    id: crypto.randomUUID(),
+    id: attributionIds?.[index] ?? crypto.randomUUID(),
     user_id: userId,
     work_block_id: workBlockId,
     task_id: selection.taskId,
@@ -491,7 +511,7 @@ export async function persistWorkBlockAttributions(
 
   const { error: insertError } = await supabase
     .from("work_block_attributions")
-    .insert(attributions);
+    .upsert(attributions, { onConflict: "id" });
 
   if (insertError) {
     throw new Error(

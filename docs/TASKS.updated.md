@@ -9,6 +9,16 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Reliability patch (2026-09-08) — Idempotent work attribution submission
+
+Status: Complete
+
+Manual work creation and completed-work attribution now lock before their first
+network request. Manual timer-session, work-block, ledger-event, and attribution
+identifiers remain stable across retries, so ambiguous network failures upsert the
+same records instead of creating duplicates. Verified with lint, typecheck, and a
+production build.
+
 ## Release (2026-09-05) — Effective-dated economy and weekly ledger UI
 
 Status: Complete

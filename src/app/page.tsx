@@ -53,6 +53,7 @@ import {
 import { exercisePalette, penaltyPalette, rewardPalette, timerPalette } from "@/lib/timerPalette";
 import {
   AUTH_REQUIRED_MESSAGE,
+  createManualWorkArtifactIds,
   ensureWorkspaceUser,
   fetchAttributionSelectionsForWorkBlock,
   fetchWorkspaceData,
@@ -67,6 +68,7 @@ import {
   persistWorkBlockAttributions,
   updateManualWorkEntry,
   updateRewardSpendEntry,
+  type ManualWorkArtifactIds,
 } from "@/lib/workspace";
 import { archiveTask, completeDailyFocusItem, completeTask, dropDailyFocusItem, removeTaskFromDailyFocus } from "@/lib/tasks";
 import type {
@@ -145,6 +147,12 @@ type PendingSessionEnd = {
 };
 
 type BehaviorDialogMode = { kind: "create" } | { kind: "edit"; event: BehaviorEvent };
+
+type ManualWorkSubmission = {
+  artifactIds: ManualWorkArtifactIds;
+  attributionIdsByTaskId: Record<string, string>;
+  completedAt: string;
+};
 
 function isToday(isoTimestamp: string) {
   const now = new Date();
@@ -560,6 +568,12 @@ export default function HomePage() {
   const [manualWorkMinutes, setManualWorkMinutes] = useState("50");
   const [manualWorkNote, setManualWorkNote] = useState("");
   const [isManualDialogOpen, setIsManualDialogOpen] = useState(false);
+  const [isManualWorkSaving, setIsManualWorkSaving] = useState(false);
+  const [isAttributionSaving, setIsAttributionSaving] = useState(false);
+  const manualWorkSaveInFlightRef = useRef(false);
+  const attributionSaveInFlightRef = useRef(false);
+  const manualWorkSubmissionRef = useRef<ManualWorkSubmission | null>(null);
+  const attributionIdsByTaskIdRef = useRef<Record<string, string>>({});
   const [isRewardDialogOpen, setIsRewardDialogOpen] = useState(false);
   const [rewardDialogMode, setRewardDialogMode] = useState<RewardDialogMode>({ kind: "create" });
   const [rewardHours, setRewardHours] = useState("0");
@@ -961,6 +975,7 @@ export default function HomePage() {
     workBlock: WorkBlock;
   }) => {
     try {
+      attributionIdsByTaskIdRef.current = {};
       const selectionState = await prepareAttributionSelectionState();
       setAttributionDialogState({
         ledgerEvent,
@@ -995,6 +1010,7 @@ export default function HomePage() {
 
     try {
       const selectionState = await prepareAttributionSelectionState();
+      manualWorkSubmissionRef.current = null;
       setManualWorkDialogMode({ kind: "create" });
       setManualWorkMinutes("50");
       setManualWorkNote("");
@@ -1150,6 +1166,10 @@ export default function HomePage() {
   };
 
   const handleManualWorkAdd = async () => {
+    if (manualWorkSaveInFlightRef.current) {
+      return;
+    }
+
     const durationMinutes = Number.parseInt(manualWorkMinutes, 10);
 
     if (!supabase || !workspaceUserId || !manualAttributionState) {
@@ -1178,6 +1198,8 @@ export default function HomePage() {
       return;
     }
 
+    manualWorkSaveInFlightRef.current = true;
+    setIsManualWorkSaving(true);
     setPersistenceState({
       kind: "saving",
       message: "Saving manual work block and attribution...",
@@ -1197,14 +1219,33 @@ export default function HomePage() {
         });
         await reloadWorkspaceData(workspaceUserId);
       } else {
-        const artifacts = await persistManualWorkBlock(supabase, {
+        const submission = manualWorkSubmissionRef.current ?? {
+          artifactIds: createManualWorkArtifactIds(),
+          attributionIdsByTaskId: {},
           completedAt: new Date().toISOString(),
+        };
+        manualWorkSubmissionRef.current = submission;
+        const attributionIds = selections.map((selection) => {
+          const existingId = submission.attributionIdsByTaskId[selection.taskId];
+
+          if (existingId) {
+            return existingId;
+          }
+
+          const id = crypto.randomUUID();
+          submission.attributionIdsByTaskId[selection.taskId] = id;
+          return id;
+        });
+        const artifacts = await persistManualWorkBlock(supabase, {
+          artifactIds: submission.artifactIds,
+          completedAt: submission.completedAt,
           durationMinutes,
           note: manualWorkNote,
           userId: workspaceUserId,
         });
 
         await persistWorkBlockAttributions(supabase, {
+          attributionIds,
           durationMinutes,
           ledgerEvent: artifacts.ledgerEvent,
           note: manualWorkNote,
@@ -1221,6 +1262,7 @@ export default function HomePage() {
       setManualWorkMinutes("50");
       const createdTasksThisTurn = manualAttributionState.createdTasksThisTurn;
       setManualAttributionState(null);
+      manualWorkSubmissionRef.current = null;
       setManualWorkDialogMode({ kind: "create" });
       setIsManualDialogOpen(false);
       setPersistenceState({
@@ -1244,6 +1286,9 @@ export default function HomePage() {
         kind: "error",
         message: error instanceof Error ? error.message : "Could not save the manual work block.",
       });
+    } finally {
+      manualWorkSaveInFlightRef.current = false;
+      setIsManualWorkSaving(false);
     }
   };
 
@@ -1986,6 +2031,10 @@ export default function HomePage() {
   };
 
   const handleSaveWorkAttribution = async () => {
+    if (attributionSaveInFlightRef.current) {
+      return;
+    }
+
     if (!supabase || !workspaceUserId || !attributionDialogState) {
       return;
     }
@@ -2000,6 +2049,8 @@ export default function HomePage() {
       return;
     }
 
+    attributionSaveInFlightRef.current = true;
+    setIsAttributionSaving(true);
     setPersistenceState({
       kind: "saving",
       message: "Saving work attribution...",
@@ -2007,8 +2058,20 @@ export default function HomePage() {
 
     try {
       const selections = buildAttributionSelections(attributionDialogState);
+      const attributionIds = selections.map((selection) => {
+        const existingId = attributionIdsByTaskIdRef.current[selection.taskId];
+
+        if (existingId) {
+          return existingId;
+        }
+
+        const id = crypto.randomUUID();
+        attributionIdsByTaskIdRef.current[selection.taskId] = id;
+        return id;
+      });
 
       const result = await persistWorkBlockAttributions(supabase, {
+        attributionIds,
         durationMinutes: attributionDialogState.workBlock.duration_minutes,
         ledgerEvent: attributionDialogState.ledgerEvent,
         selections,
@@ -2044,6 +2107,9 @@ export default function HomePage() {
         kind: "error",
         message: error instanceof Error ? error.message : "Could not save the work attribution.",
       });
+    } finally {
+      attributionSaveInFlightRef.current = false;
+      setIsAttributionSaving(false);
     }
   };
 
@@ -2359,6 +2425,7 @@ export default function HomePage() {
         onClose={() => {
           setIsManualDialogOpen(false);
           setManualAttributionState(null);
+          manualWorkSubmissionRef.current = null;
           setManualWorkDialogMode({ kind: "create" });
           setManualWorkMinutes("50");
           setManualWorkNote("");
@@ -2397,8 +2464,17 @@ export default function HomePage() {
               selectedTaskIds={manualAttributionState.selectedTaskIds}
             />
 
-            <Button className="w-full" onClick={handleManualWorkAdd} variant="secondary">
-              {manualWorkDialogMode.kind === "edit" ? "Save changes" : "Save work block"}
+            <Button
+              className="w-full"
+              disabled={isManualWorkSaving}
+              onClick={handleManualWorkAdd}
+              variant="secondary"
+            >
+              {isManualWorkSaving
+                ? "Saving..."
+                : manualWorkDialogMode.kind === "edit"
+                  ? "Save changes"
+                  : "Save work block"}
             </Button>
           </div>
         ) : null}
@@ -2508,8 +2584,12 @@ export default function HomePage() {
             />
 
             <div className="flex justify-end">
-              <Button onClick={handleSaveWorkAttribution} variant="secondary">
-                Save attribution
+              <Button
+                disabled={isAttributionSaving}
+                onClick={handleSaveWorkAttribution}
+                variant="secondary"
+              >
+                {isAttributionSaving ? "Saving..." : "Save attribution"}
               </Button>
             </div>
           </div>
