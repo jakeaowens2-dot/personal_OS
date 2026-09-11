@@ -191,6 +191,8 @@ export function LedgerEventList({
         }
 
         const event = item.event;
+        const canEdit = Boolean(onRequestEdit && (showEditAction ? showEditAction(event) : true));
+        const canDelete = Boolean(onRequestDelete && (showDeleteAction ? showDeleteAction(event) : true));
 
         return (
           <article
@@ -215,12 +217,12 @@ export function LedgerEventList({
                 className="mt-1 h-3.5 w-3.5 rounded-[4px]"
                 style={{ backgroundColor: getDeltaSwatchColor(event) }}
               />
-              {onRequestEdit || onRequestDelete ? (
+              {canEdit || canDelete ? (
                 <PopoverMenu
                   buttonClassName="-mt-1 px-2 py-0.5 text-lg font-semibold leading-none text-slate-500 hover:text-slate-900"
                   label="⋯"
                 >
-                  {onRequestEdit && (showEditAction ? showEditAction(event) : true) ? (
+                  {canEdit && onRequestEdit ? (
                     <button
                       className="block w-full rounded-[0.6rem] px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/90 hover:text-slate-950"
                       onClick={() => onRequestEdit(event)}
@@ -229,7 +231,7 @@ export function LedgerEventList({
                       Edit
                     </button>
                   ) : null}
-                  {onRequestDelete && (showDeleteAction ? showDeleteAction(event) : true) ? (
+                  {canDelete && onRequestDelete ? (
                     <button
                       className="block w-full rounded-[0.6rem] px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/90 hover:text-slate-950"
                       onClick={() => onRequestDelete(event)}

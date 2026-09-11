@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LedgerEventList } from "@/components/ledger/LedgerEventList";
+import { EditableHistoryLedger } from "@/components/ledger/EditableHistoryLedger";
 import { fetchActivityHistoryPage, type ActivityItem } from "@/lib/history";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { AUTH_REQUIRED_MESSAGE, ensureWorkspaceUser } from "@/lib/workspace";
@@ -72,6 +72,21 @@ export default function HistoryPage() {
     return () => observer.disconnect();
   }, [isLoading, loadPage, nextCursor, userId]);
 
+  const getItemTimestamp = (item: ActivityItem) =>
+    item.kind === "ledger" ? item.event.created_at : item.event.occurred_at;
+
+  const replaceItem = (updated: ActivityItem) => {
+    setItems((current) => current
+      .map((item) => item.kind === updated.kind && item.event.id === updated.event.id ? updated : item)
+      .sort((left, right) => getItemTimestamp(right).localeCompare(getItemTimestamp(left))));
+  };
+
+  const removeItem = (deleted: ActivityItem) => {
+    setItems((current) => current.filter(
+      (item) => item.kind !== deleted.kind || item.event.id !== deleted.event.id,
+    ));
+  };
+
   return (
     <main className="min-h-screen bg-[#f3ede4] px-5 py-8 text-slate-900 sm:px-8">
       <div className="mx-auto max-w-3xl">
@@ -94,10 +109,18 @@ export default function HistoryPage() {
           </div>
         ) : (
           <>
-            <LedgerEventList
-              emptyMessage={isLoading ? "Loading activity…" : "No saved activity yet."}
-              items={items}
-            />
+            {supabase && userId ? (
+              <EditableHistoryLedger
+                emptyMessage={isLoading ? "Loading activity…" : "No saved activity yet."}
+                items={items}
+                onDeleted={removeItem}
+                onUpdated={replaceItem}
+                supabase={supabase}
+                userId={userId}
+              />
+            ) : isLoading ? (
+              <p className="px-1 py-4 text-sm text-slate-600">Loading activity…</p>
+            ) : null}
             <div className="flex min-h-24 items-center justify-center" ref={loadMoreRef}>
               {isLoading && items.length > 0 ? (
                 <span className="text-xs text-slate-400">Loading older activity…</span>

@@ -9,6 +9,16 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## History controls (2026-09-10) — Edit and delete full-ledger activity
+
+Status: Complete
+
+The progressively loaded `/history` route now exposes the supported edit and delete
+actions for manual work, reward spending, and behavior events. Edits reuse the
+existing accounting helpers and preserve work attribution; confirmed deletions remove
+linked records through the existing guarded deletion helpers. Verified with lint,
+typecheck, and a production build.
+
 ## Reliability patch (2026-09-08) — Idempotent work attribution submission
 
 Status: Complete
