@@ -1,9 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type {
-  DailyFocusItemWithTask,
-  Task,
-  WorkBlockAttribution,
-} from "@/lib/types";
+import type { DailyFocusItemWithTask } from "@/lib/types";
 import { fetchDailyFocusItems, fetchTasks } from "@/lib/tasks";
 
 // ---------------------------------------------------------------------------
@@ -81,7 +77,33 @@ export type RecentAttribution = {
   earnedAt: string;
 };
 
+export type PlanningContextWarning = {
+  code:
+    | "today_focus_unavailable"
+    | "yesterday_focus_unavailable"
+    | "carryover_unavailable"
+    | "recently_completed_unavailable"
+    | "recent_attributions_unavailable"
+    | "deadline_pressure_unavailable"
+    | "backlog_pressure_unavailable";
+  message: string;
+};
+
+export type RepeatedDeferralsContext = {
+  status: "not_computed";
+  items: [];
+};
+
+export type CandidateDailyPlanContext = {
+  status: "not_computed";
+  primary: [];
+  secondary: [];
+  intentionalDeferrals: [];
+};
+
 export type PlanningContextPacketV1 = {
+  schemaVersion: 1;
+  generatedAt: string;
   date: string;
   todayFocus: FocusItemSummary[];
   yesterdayFocus: FocusItemSummary[];
@@ -93,6 +115,9 @@ export type PlanningContextPacketV1 = {
     totalOpen: number;
     byPriority: Record<string, number>;
   };
+  repeatedDeferrals: RepeatedDeferralsContext;
+  candidateDailyPlan: CandidateDailyPlanContext;
+  contextWarnings: PlanningContextWarning[];
 };
 
 // ---------------------------------------------------------------------------
@@ -144,28 +169,53 @@ async function fetchCarryover(
 ) {
   const { data, error } = await supabase
     .from("daily_focus_items")
-    .select("id, task_id, position, focus_status, carried_forward, status_reason, task:tasks!inner(id, title, priority)")
-    .eq("user_id", userId)
+    .select(
+      "id, task_id, position, focus_status, carried_forward, status_reason, created_at, daily_focus_lists!inner(date, user_id), task:tasks!inner(id, title, priority, status)",
+    )
+    .eq("daily_focus_lists.user_id", userId)
     .eq("carried_forward", true)
     .in("focus_status", ["planned", "active"])
-    .order("position", { ascending: true });
+    .order("created_at", { ascending: false })
+    .limit(50);
 
   if (error) {
-    return [] as CarryoverItem[];
+    throw new Error("Could not load unresolved carryover.");
   }
 
-  return ((data ?? []) as unknown as Array<{
+  const rows = (data ?? []) as unknown as Array<{
     id: string;
     task_id: string;
     focus_status: string;
-    task: unknown;
-  }>).map((row) => ({
-    focusItemId: row.id,
-    taskId: row.task_id,
-    title: (row.task as { title?: string } | undefined)?.title ?? "Unknown",
-    priority: (row.task as { priority?: string } | undefined)?.priority ?? "medium",
-    daysCarried: null,
-  }));
+    task: { priority: string; status: string; title: string } | null;
+    daily_focus_lists: { date: string; user_id: string } | null;
+  }>;
+  const newestItemByTask = new Map<string, (typeof rows)[number]>();
+
+  for (const row of rows) {
+    if (!row.task || !row.daily_focus_lists) {
+      continue;
+    }
+
+    if (row.task.status !== "open" && row.task.status !== "in_progress" && row.task.status !== "blocked") {
+      continue;
+    }
+
+    const existing = newestItemByTask.get(row.task_id);
+
+    if (!existing || row.daily_focus_lists.date > (existing.daily_focus_lists?.date ?? "")) {
+      newestItemByTask.set(row.task_id, row);
+    }
+  }
+
+  return [...newestItemByTask.values()]
+    .map((row) => ({
+      focusItemId: row.id,
+      taskId: row.task_id,
+      title: row.task?.title ?? "Unknown",
+      priority: row.task?.priority ?? "medium",
+      daysCarried: row.daily_focus_lists ? daysBetweenDateKeys(row.daily_focus_lists.date, getTodayDateKey()) : null,
+    }))
+    .sort((left, right) => right.daysCarried! - left.daysCarried! || left.title.localeCompare(right.title));
 }
 
 async function fetchRecentlyCompleted(
@@ -182,7 +232,7 @@ async function fetchRecentlyCompleted(
     .limit(10);
 
   if (error) {
-    return [] as RecentlyCompletedTask[];
+    throw new Error("Could not load recently completed tasks.");
   }
 
   return ((data ?? []) as unknown as Array<{
@@ -213,7 +263,7 @@ async function fetchRecentAttributions(
     .limit(20);
 
   if (error) {
-    return [] as RecentAttribution[];
+    throw new Error("Could not load recent work attributions.");
   }
 
   const rows = (data ?? []) as unknown as Array<{
@@ -249,7 +299,7 @@ async function fetchDeadlinePressure(
     .limit(10);
 
   if (error) {
-    return [] as DeadlineItem[];
+    throw new Error("Could not load deadline pressure.");
   }
 
   const rows = (data ?? []) as unknown as Array<{
@@ -302,25 +352,78 @@ export async function buildPlanningContextPacket(
   supabase: SupabaseClient,
   userId: string,
 ): Promise<PlanningContextPacketV1> {
-  const [todayFocus, yesterdayFocus, carryover, recentlyCompleted, recentAttributions, deadlinePressure, backlogPressure] =
-    await Promise.all([
-      fetchTodayFocus(supabase, userId),
-      fetchYesterdayFocus(supabase, userId),
-      fetchCarryover(supabase, userId),
-      fetchRecentlyCompleted(supabase, userId),
-      fetchRecentAttributions(supabase, userId),
-      fetchDeadlinePressure(supabase, userId),
-      fetchBacklogPressure(supabase, userId),
-    ]);
+  const [todayFocus, yesterdayFocus, carryover, recentlyCompleted, recentAttributions, deadlinePressure, backlogPressure] = await Promise.all([
+    loadPlanningSection("today_focus_unavailable", "Today’s focus could not be loaded.", [], () => fetchTodayFocus(supabase, userId)),
+    loadPlanningSection("yesterday_focus_unavailable", "Yesterday’s focus could not be loaded.", [], () => fetchYesterdayFocus(supabase, userId)),
+    loadPlanningSection("carryover_unavailable", "Carryover could not be loaded.", [], () => fetchCarryover(supabase, userId)),
+    loadPlanningSection("recently_completed_unavailable", "Recently completed tasks could not be loaded.", [], () => fetchRecentlyCompleted(supabase, userId)),
+    loadPlanningSection("recent_attributions_unavailable", "Recent work attributions could not be loaded.", [], () => fetchRecentAttributions(supabase, userId)),
+    loadPlanningSection("deadline_pressure_unavailable", "Deadline pressure could not be loaded.", [], () => fetchDeadlinePressure(supabase, userId)),
+    loadPlanningSection("backlog_pressure_unavailable", "Backlog pressure could not be loaded.", { totalOpen: 0, byPriority: {} }, () => fetchBacklogPressure(supabase, userId)),
+  ]);
 
   return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
     date: getTodayDateKey(),
-    todayFocus,
-    yesterdayFocus,
-    carryover,
-    recentlyCompleted,
-    recentAttributions,
-    deadlinePressure,
-    backlogPressure,
+    todayFocus: todayFocus.value,
+    yesterdayFocus: yesterdayFocus.value,
+    carryover: carryover.value,
+    recentlyCompleted: recentlyCompleted.value,
+    recentAttributions: recentAttributions.value,
+    deadlinePressure: deadlinePressure.value,
+    backlogPressure: backlogPressure.value,
+    repeatedDeferrals: {
+      status: "not_computed",
+      items: [],
+    },
+    candidateDailyPlan: {
+      status: "not_computed",
+      primary: [],
+      secondary: [],
+      intentionalDeferrals: [],
+    },
+    contextWarnings: [
+      ...todayFocus.warnings,
+      ...yesterdayFocus.warnings,
+      ...carryover.warnings,
+      ...recentlyCompleted.warnings,
+      ...recentAttributions.warnings,
+      ...deadlinePressure.warnings,
+      ...backlogPressure.warnings,
+    ],
   };
+}
+
+type PlanningSectionResult<T> = {
+  value: T;
+  warnings: PlanningContextWarning[];
+};
+
+async function loadPlanningSection<T>(
+  code: PlanningContextWarning["code"],
+  message: string,
+  fallback: T,
+  loader: () => Promise<T>,
+): Promise<PlanningSectionResult<T>> {
+  try {
+    return {
+      value: await loader(),
+      warnings: [],
+    };
+  } catch {
+    return {
+      value: fallback,
+      warnings: [{ code, message }],
+    };
+  }
+}
+
+function daysBetweenDateKeys(earlierDate: string, laterDate: string) {
+  const [earlierYear, earlierMonth, earlierDay] = earlierDate.split("-").map(Number);
+  const [laterYear, laterMonth, laterDay] = laterDate.split("-").map(Number);
+  const earlierUtc = Date.UTC(earlierYear, earlierMonth - 1, earlierDay);
+  const laterUtc = Date.UTC(laterYear, laterMonth - 1, laterDay);
+
+  return Math.max(0, Math.floor((laterUtc - earlierUtc) / (1000 * 60 * 60 * 24)));
 }

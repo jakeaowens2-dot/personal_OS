@@ -44,6 +44,14 @@ Read freely -> propose visibly -> write only with approval
 
 In the current phase, agents may read structured task/work state and propose mutations. They must not silently mutate canonical task, focus, project, memory, source, calendar, email, GitHub, or external communication state.
 
+Pilot refinement (2026-09-12): the user has delegated maintenance of application-owned
+preferences, daily notes/carry-forward and ongoing-priority summaries. The implemented pilot
+contract in `ASSISTANT_MEMORY_PILOT.md` narrows this older blanket memory restriction
+for those three homes through validated, sourced write tools. Task proposals now
+have a separately approved atomic Apply path; ledger and external-action writes
+remain unavailable. The dedicated Hermes runtime and schema are implemented;
+activation on the real Supabase project and signed-in acceptance are pending.
+
 Continuity comes before search. Morning planning should start from yesterday's plan, unfinished work, recent completions, work-block attributions, stale or resurfacing tasks, deadlines, and user-added tasks. Full semantic search, source ingestion, graph traversal, and external signals come later.
 
 The UI should remain quiet. Operational surfaces may exist in settings or dedicated routes, but the Home screen should remain a calm execution surface centered on the timer, current work state, reward balance, and a compact daily focus.
@@ -71,6 +79,13 @@ Deferred but still valid:
 - Notifications.
 - Calendar/email/GitHub/external actions.
 - Team or multi-user company workflow.
+
+Assistant pilot code (2026-09-12): durable authenticated chat, versioned preferences/
+daily notes/ongoing priorities, native Hermes tools, daily views and handoffs, and
+reviewed task creation/status/priority/progress updates. The additive schema is in
+`20260912000000_assistant_daily_planning.sql`; actual remote installation remains
+pending. This implements a bounded subset of the contracts below, not the full
+morning-brief, planning-session, proposal-batch or project-memory system.
 
 ## 4. Near-Term Product Scope: Personal OS v0
 
@@ -566,7 +581,11 @@ Rules:
 
 ### DailyMemoryDocument
 
-One short agent-legible continuity document per user per day.
+One short agent-legible continuity document per user per day. The implemented
+pilot stores this in `assistant_memory_documents` with kind `daily`, a local-date
+key, and typed entries containing text, source IDs, disposition and rationale.
+The sectioned Markdown fields below remain the broader future contract; do not
+create a second `daily_memory_documents` table for the same pilot state.
 
 Suggested fields:
 - `id`
@@ -578,6 +597,7 @@ Suggested fields:
 - `work_session_log_markdown`
 - `final_summary_markdown`
 - `carry_forward_markdown`
+- `carry_forward_review_json` (pilot: item/source IDs, dispositions, reasons and review/presentation revisions)
 - `source_snapshot_json`
 - `created_at`
 - `updated_at`
@@ -721,6 +741,13 @@ When the user starts daily planning, retrieve structured context in this order:
 
 Do not search the whole database each morning. Prefer small, explainable, typed queries over broad retrieval.
 
+`PlanningContextPacketV1` is the stable, JSON-serializable boundary between
+retrieval and later planning logic. It includes the date, generation timestamp,
+the retrieved sections, and `context_warnings`. A failed section must remain an
+empty value with a visible warning; it must not silently masquerade as a genuine
+absence of data. Until their phases are implemented, repeated-deferral and
+candidate-plan sections must explicitly report that they are not computed.
+
 The first candidate plan builder should be deterministic. It should score tasks based on visible factors such as current focus, carryover, deadlines, stale high-priority tasks, repeated resurfacing, and recent work activity.
 
 ## 11. Eat-the-Frog Rule
@@ -787,6 +814,22 @@ Flow:
    - create carry-forward notes for tomorrow
 
 Daily memory should be editable. It should not become an unbounded transcript.
+
+Pilot clarification (2026-09-12): carry-forward has no fixed item quota. Persist
+an inspectable review of meaningful candidates with a disposition (relevant next
+day, not relevant next day, or uncertain), reason and evidence. Show all groups
+clearly at end-of-day closeout and next opening, preserve user corrections and
+review revisions, and explain changed judgments. Uncertainty must remain visible;
+no silent exclusions due to count or age. A missed closeout becomes a labeled
+catch-up review; save daily notes incrementally regardless of closeout success.
+
+Daily chat views group durable messages by the user's local date and expose prior
+history. A new day clears the visible conversation area while showing the opening
+handoff; it does not reset the logical assistant or its native long context.
+Application-owned core state supplements that context and wins on conflicts about
+preferences, focuses, tasks and direction. Native history/search/compaction remain
+available; deconflict independent preference stores without disabling useful
+context capabilities. See `ASSISTANT_MEMORY_PILOT.md` for the detailed contract.
 
 ## 14. Brief Behavior
 

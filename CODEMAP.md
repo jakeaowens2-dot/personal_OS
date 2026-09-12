@@ -22,6 +22,8 @@ src/
     settings/
       tasks/
         page.tsx
+      agent-context/
+        page.tsx
   components/
     auth/
       EmailAuthPanel.tsx
@@ -72,6 +74,7 @@ tsconfig.typecheck.json
 
 docs/
   ECONOMY.md
+  PERSONAL_ASSISTANT_BRIEF_SPEC.md
   PRODUCT_SPEC.updated.md
   STYLE_GUIDE.md
   TASKS.updated.md
@@ -146,12 +149,38 @@ supabase/
 
 Read:
 - `docs/PRODUCT_SPEC.updated.md`
+- `docs/PERSONAL_ASSISTANT_BRIEF_SPEC.md` for the agreed assistant, morning-brief,
+  research-buffer, SMS, and competitor-watch product direction.
+- `docs/PERSONAL_ASSISTANT_AUDIT_2026-09-10.md` for verified progress, integration gaps,
+  and the proposed first assistant release.
 - `docs/STYLE_GUIDE.md`
 
 ### Task sequencing
 
 Read:
 - `docs/TASKS.updated.md`
+
+### Planning context
+
+Current files:
+- `src/lib/planning.ts` builds the read-only, warning-aware planning context packet from task, focus, and work records.
+- `src/app/settings/agent-context/page.tsx` renders the settings-only preview of that exact packet.
+
+### Local personal assistant
+
+- `docs/ASSISTANT_LOCAL.md` is the current subscription-first plan and local run guide.
+- `docs/HERMES_EVALUATION_2026-09-11.md` records the live Hermes subscription, tools and memory trial, including installed-runtime defects.
+- `docs/ASSISTANT_MEMORY_PILOT.md` defines core memory ownership, visible carry-forward reviews, daily chat views and continuing agent context; includes the implemented pilot contract and remaining activation checks.
+- `src/app/assistant/page.tsx` is authenticated daily chat, date history, export, closeout/catch-up and retry recovery.
+- `src/app/assistant/assistant.module.css` styles the warm chat layout, Moab orange sandstone bubbles and compact composer.
+- `src/app/api/assistant/route.ts` authenticates local state/turn/review/proposal requests; SQL leases fence concurrent turns.
+- `src/lib/assistant/hermes.ts` and `scripts/hermes-planning-worker.py` run the dedicated native Hermes loop with fixed application tools and profile-scoped history.
+- `src/lib/assistant/state.ts`, `store.ts`, `tools.ts`, and `planning-prompt.ts` own canonical types/validation, current context, tool contracts, and planning instructions.
+- `src/components/assistant/WorkingState.tsx` renders memory, sources/revisions, all carry-forward groups, and task proposal review.
+- `supabase/migrations/20260912000000_assistant_daily_planning.sql` owns assistant storage, RLS, leases, revision-safe memory writes and atomic task approval.
+- `scripts/assistant-planning.test.cjs` and `assistant-db.test.{cjs,sql}` verify boundaries and disposable-database acceptance; `assistant-hermes.smoke.cjs` is the opt-in subscription-backed runtime check.
+- `codex.ts`, `prompt.ts`, `context.ts`, and their original tests retain the earlier chat-only experiment as reference; they are not the active endpoint. `contracts.ts` still supplies local request limits/origin checks.
+- `scripts/start-assistant.mjs` launches the loopback experiment; `scripts/assistant.test.cjs` verifies its boundaries with a fake runtime.
 
 ### Timer UI
 
@@ -254,6 +283,7 @@ Current files:
 - `src/app/page.tsx`
 - `src/app/globals.css`
 - `src/app/settings/tasks/page.tsx` is the quiet task vault for creating, editing, completing, archiving, and auditing canonical tasks.
+- `src/app/settings/agent-context/page.tsx` previews the read-only planning context packet used by future daily planning.
 - `src/app/projects/safety-evidence/page.tsx` is the project fieldbook: a deliberate submit-to-complete checklist with saved deliverables, outline import, and local in-memory preview mode.
 - `src/app/task-tracker/page.tsx` redirects to the local-only fieldbook preview for fast UI iteration.
 - `src/app/page.tsx` now also shows the compact daily focus list and links back to the task vault for management.

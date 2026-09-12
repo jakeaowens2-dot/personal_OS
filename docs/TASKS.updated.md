@@ -9,6 +9,116 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Current priority — daily-planning assistant pilot (2026-09-12)
+
+Status: Code implemented; real Supabase activation and signed-in acceptance pending.
+
+Selected bounded window: use the existing chat for daily planning, automatically
+maintain the three application-owned memory homes, and review task creation,
+status, priority and progress-note changes. This advances the narrow pilot ahead
+of the broader planning/proposal engine and research integrations.
+
+- Implemented: authenticated durable messages; per-user turn leases/retry keys;
+  three typed memory homes with source ownership and revision receipts; dedicated
+  Hermes native-loop adapter; current task/focus retrieval; task proposals and
+  atomic, stale-guarded, idempotent Apply/Reject; daily history and source links;
+  Memory inspection/correction; visible no-quota closeout/catch-up reviews.
+- Verified: 18 automated tests, TypeScript/lint and production build; isolated
+  PostgreSQL tests of the actual migration (including prior-handoff coverage);
+  real Hermes tool calls, continuing-session recall and fresh-session recovery
+  from the app memory packet. Synthetic test data never entered real user state.
+- Activation gate: apply `20260912000000_assistant_daily_planning.sql` to the
+  existing Personal OS Supabase project and sign in locally. No migration access
+  was configured in the checkout; the signed-in end-to-end acceptance is pending.
+- Still deferred: daily-focus mutation, broad proposal batches, full morning brief,
+  scheduler, research/SMS, and guaranteed erasure from revisions/native history.
+
+See `ASSISTANT_LOCAL.md` for operation/verification and `ASSISTANT_MEMORY_PILOT.md`
+for the implemented contract and remaining acceptance boundaries. Branch:
+`codex/assistant-daily-planning`. Earlier experiment entries below are historical.
+
+## Current priority — Codex Business assistant experiment (2026-09-10)
+
+Status: Initial read-only local conversation implemented; live workspace-context acceptance remains open.
+
+The user explicitly selected the existing ChatGPT Codex Business subscription,
+accepted local-machine or Droplet dependence, and moved real assistant use ahead
+of the underlying data-model work. This supersedes strict phase ordering for the
+current slice. See `docs/ASSISTANT_LOCAL.md` for the revised plan and run guide.
+
+Implemented: `/assistant`, loopback-only `/api/assistant`, a restricted Codex stdio
+adapter using ChatGPT authentication, browser-local conversation history/export,
+optional read-only task/focus context, and retry/cancel/error handling. No database
+migration or task-write protocol is required for this read-only experiment.
+
+Verified: eight automated boundary/runtime tests, lint, typecheck and production
+build; real ChatGPT Business-authenticated planning reply and follow-up in the
+browser, plus conversation persistence after reload. Live task context remains
+unverified because the browser is signed out.
+
+Next: use the conversation, verify signed-in task context, then select the
+smallest useful improvement. Proposal writes still require explicit review and
+atomic application when implemented. General mutation schemas, capacity scoring,
+daily-memory consolidation, research and SMS are not prerequisites for chatting.
+
+Visual refinement (2026-09-10): Updated the assistant page and added a scoped CSS
+module with right-aligned Moab orange sandstone user bubbles, existing sans-serif type
+and Personal OS neutral surfaces. Simplified the composer and moved connection,
+context and export controls into Details. No placeholder reaction controls or
+new dependencies. Verified live conversation rendering and Details interaction,
+lint, typecheck and production build.
+
+Hermes evaluation (2026-09-11): Live Codex-authenticated file reading, persistent
+memory, and fresh-session history retrieval passed in an isolated profile.
+Stdio MCP passed only with an evaluation-only liveness-check correction; the
+installed build and web assistant remain unchanged. See
+`docs/HERMES_EVALUATION_2026-09-11.md` for evidence and the memory argument issue
+to resolve before adopting Hermes as the app runtime.
+
+Memory design refinement (2026-09-12): The user selected three application-owned
+homes for the Hermes pilot: preferences, daily notes/carry-forward and ongoing
+priorities. `docs/ASSISTANT_MEMORY_PILOT.md` maps existing spec coverage and proposes
+storage, bounded maintenance, provenance, write validation and successor tests.
+Design prepared; runtime integration and memory migrations remain unimplemented.
+This advances narrow conversational continuity ahead of the broader Phase 10
+planning/work-finalization integrations and Phase 12 project-memory expansion.
+
+User clarification (2026-09-12): replace quota-based carry-forward with reasoned
+relevant/not-relevant/uncertain dispositions, visible at closeout and next opening
+with correction history. Add daily chat views/history navigation while preserving
+one continuing logical assistant and native long context. App memory protects core
+preferences, focuses, tasks and direction alongside harness context; deconflict
+competing preference stores. These behaviors are specified, not yet implemented.
+
+### Pilot acceptance — daily chat continuity
+
+Status: Implemented in the bounded pilot; signed-in browser rollover acceptance pending.
+
+- Fresh Today view with opening handoff and previous/next day or date navigation.
+- Dated history remains available; browsing it does not rewind the active runtime.
+- Continuing an old exchange posts today with a reference to the original.
+- Daily UI grouping is independent of runtime sessions; midnight does not reset
+  the agent or discard an in-flight turn.
+- Repeated review delivery is deduplicated; more than three relevant items and
+  uncertain items survive rollover, and user corrections remain effective.
+- Separately verify successor recovery of core app state without requiring a
+  normal daily agent reset or replication of all harness-internal memory.
+
+## Product Direction — Personal Assistant and Morning Brief (2026-09-01)
+
+Status: Broader vision retained; local conversation experiment now implemented
+
+The agreed product direction for the personal assistant, daily continuity,
+morning brief, SMS readiness notification, research buffer, paper queue, and
+Kansas City-weighted competitor watch is documented in
+`docs/PERSONAL_ASSISTANT_BRIEF_SPEC.md`.
+
+The September 10 user decision revises the near-term order: local Codex Business
+conversation -> lived-use feedback -> one reviewed action -> continuity and
+optional Droplet hosting -> proactive briefing/research/SMS. Canonical task state
+remains in Supabase. The initial conversation archive is explicitly browser-local.
+There is no API-billed fallback in the current implementation.
+
 ## Side module — Project fieldbook (2026-08-30)
 
 Status: Complete
@@ -412,7 +522,7 @@ Status context: These tasks extend the existing timer/ledger/reward loop (Phases
 >
 > **Economy rework (2026-08-23):** the block/economy model was codified in `docs/ECONOMY.md` and implemented in `src/lib/economy.ts`. Key corrections over the initial 5.5.x implementation:
 > - 1 block = 1 hour in every currency; partial blocks render with light + dark fill.
-> - Work blocks = `work_minutes / 50`; reward earned at 20/30 min per work block (duration-derived, fixing the "1 reward block per work block" bug).
+> - Work blocks = `work_minutes / 50`; reward is effective-dated at 20/30 minutes before September 5, 2026 and 15/22.5 minutes afterward, retaining the 1.5x weekend rate.
 > - Long-flow sessions log total duration → multiple work blocks + proportional reward, then instantiate an extended break (10 min rest per 50 min work).
 > - Settlement order (penalty → debt → positive): penalties are a senior claim, overspend becomes blue dashed-outline "debt" blocks, and both fill before positive reward accrues.
 > - Behavior entries (indulgence/screen time/exercise) are now editable and deletable via the "⋯" menu, and `hardResetWorkspace` clears them.
@@ -475,7 +585,7 @@ Implementation guidance:
 - Add a "Behavior tracking" text button under "Spend reward".
 - Popup with three selectors:
   - Indulgent behavior: no extra data; records a flat −60 min penalty.
-  - Screen time: collect date + total screen minutes; apply `penalty = max(0.5 * ST, ST - 60)` (minutes). Examples: 60 → 30, 120 → 60, 150 → 90.
+  - Screen time: collect date + total screen minutes; apply a 1:1 penalty from the September 5, 2026 policy rollout while retaining earlier recorded values.
   - Exercise: collect workout length; records +1:1 positive reward minutes.
 
 Acceptance criteria:
@@ -518,7 +628,7 @@ Implementation guidance:
 - Work: red blocks = weekly work blocks; textual count of total hours.
 - Reward: blue (work-derived) + periwinkle (exercise) blocks; textual summary shows "total:" and "net:" (net = total − penalties).
 - Penalty: purple blocks = weekly penalty minutes (indulgence + screen time).
-- Add "destroyed reward blocks": greyed-out blue blocks with a purple border and a purple "X" overlay, representing reward blocks consumed by penalties.
+- Overlay a purple border and "X" on existing reward blocks consumed by penalties; do not render duplicate destroyed blocks.
 
 Acceptance criteria:
 - Three clean sections with per-category block counts and hour totals.
@@ -786,7 +896,17 @@ Verification:
 
 ### 7.2 Assemble an agent planning context packet
 
-Status: Planned
+Status: Complete
+
+Note (2026-09-01): Extended `src/lib/planning.ts` with a versioned,
+JSON-serializable `PlanningContextPacketV1`, generation timestamp, explicit
+context warnings, and honest `not_computed` placeholders for the later
+candidate-plan and repeated-deferral phases. The upstream carryover retrieval
+was audited and corrected: `daily_focus_items` is scoped through its parent
+`daily_focus_lists.user_id` (it does not have a `user_id` column), closed tasks
+are excluded, duplicate carryover tasks are collapsed to their newest item, and
+retrieval failures now surface as warnings rather than false empty states.
+Verified with `npm run typecheck`, `npm run lint`, and `npm run build`.
 
 Compress retrieved records into a small, serializable context object that an agent or deterministic planner can consume.
 
@@ -820,7 +940,14 @@ Verification:
 
 ### 7.3 Add planning context preview in settings
 
-Status: Planned
+Status: Complete
+
+Note (2026-09-01): Added the authenticated, read-only
+`/settings/agent-context` preview. It renders every current packet section,
+including sparse-account empty states and retrieval warnings, and provides a
+collapsible view of the exact JSON packet. The signed-out route was manually
+checked in the local app with no browser-console errors. Verified with
+`npm run typecheck`, `npm run lint`, and `npm run build`.
 
 Add a quiet internal preview page so a human or coding agent can inspect the planning context before any AI feature uses it.
 
@@ -1326,7 +1453,9 @@ Acceptance criteria:
 - User can manually finalize a daily memory document.
 - Finalized memory includes starting context, planned focus, notable changes, completed/advanced work, deferred/blocked/avoided work, user feedback/preferences, and carry-forward.
 - Finalization can be safely re-run or clearly prevented after finalization.
-- Tomorrow’s morning seed can consume the carry-forward section.
+- Carry-forward includes relevant, not-relevant and uncertain dispositions with reasons and evidence; no fixed item quota or silent top-N exclusions.
+- Closeout and next opening clearly show the review, including exclusions and uncertainty; preserve user corrections and identify changes.
+- Tomorrow's opening consumes the saved review. Missed closeouts are labeled catch-up reviews, and incremental daily notes survive interrupted sessions.
 
 Verification:
 - `npm run lint`

@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "assistant": "node scripts/start-assistant.mjs",
+    "test:assistant": "node --test scripts/assistant.test.cjs scripts/assistant-planning.test.cjs",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "next typegen && tsc --noEmit -p tsconfig.typecheck.json"
+    "typecheck": "next typegen && tsc --noEmit -p tsconfig.typecheck.json",
+    "test:assistant:db": "node scripts/assistant-db.test.cjs",
+    "test:assistant:live": "node scripts/assistant-hermes.smoke.cjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
