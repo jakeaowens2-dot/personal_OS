@@ -3,12 +3,23 @@
 Current slice (2026-09-12): Hermes runs behind the Personal OS chat using the
 machine's existing ChatGPT Codex login. Personal OS owns durable conversations,
 preferences, daily notes, ongoing priorities, and reviewed task proposals.
-Implementation is present; activation against the real Supabase project requires
-the migration below and a signed-in local browser. This is not a hosted release.
+Implementation is present and the assistant migration was applied to the existing
+Supabase project on 2026-09-12. Signed-in local browser acceptance remains pending.
+This is not a hosted release.
+
+Activation receipt (2026-09-12): connected using the private
+`SUPABASE_URL_SESSION_POOLER` field in `.env.local`; verified its project reference
+matches the app URL and the existing task columns/audit triggers. Applied only
+`20260912000000_assistant_daily_planning.sql` in one transaction and reloaded the
+PostgREST schema cache. Verified nine assistant tables and nine ownership policies,
+RLS on every table, no anonymous writes, and private helper execution revoked.
+The project has no `supabase_migrations.schema_migrations` table; this was a direct
+SQL application, not a CLI migration-history baseline. Do not replay this file or
+run an unreviewed bulk `db push`. Existing tasks and ledger data were not changed.
 
 ## Start and activate
 
-1. Apply `supabase/migrations/20260912000000_assistant_daily_planning.sql` to the
+1. Already applied to the current project: `supabase/migrations/20260912000000_assistant_daily_planning.sql`. For a new installation, apply it to the
    **existing Personal OS Supabase project**. This additive migration creates only
    assistant tables/functions/policies; it uses existing `tasks` and task-revision
    triggers. Do not replay unrelated migrations or reset the database.
@@ -19,6 +30,12 @@ the migration below and a signed-in local browser. This is not a hosted release.
 4. Try a real planning exchange: name a continuing priority and why, give a progress
    update on a task, then review any proposed task change with Apply or Reject.
    Open Memory to inspect the saved entries and their source/revision receipts.
+
+Local authentication is separate from the hosted Vercel session. Home requests
+`emailRedirectTo: window.location.origin`. If a locally requested magic link lands
+on Vercel, inspect Supabase Auth URL Configuration for the exact localhost redirect
+and the email template before requesting another link. That dashboard configuration
+has not yet been inspected; the observed localhost browser remains signed out.
 
 Keep the local process running. The launcher binds to `127.0.0.1`; the API also
 requires same-origin loopback requests and rejects ordinary Vercel launches.
@@ -102,7 +119,7 @@ active endpoint uses `hermes.ts` and `hermes-planning-worker.py`.
   Test data was fictional, outside real application state. Test credentials were
   removed afterward. This verifies the adapter, not activation of the hosted schema.
 
-Pending real-user acceptance: install the migration, authenticate locally, verify
+Pending real-user acceptance: authenticate locally, verify
 an actual task/focus read, a real memory correction, approved task update, and
 closeout/opening in the signed-in browser. No production deployment or Git push
 is part of this slice. The branch is `codex/assistant-daily-planning`; unrelated

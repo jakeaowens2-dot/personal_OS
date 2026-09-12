@@ -11,7 +11,7 @@ When a task is completed:
 
 ## Current priority — daily-planning assistant pilot (2026-09-12)
 
-Status: Code implemented; real Supabase activation and signed-in acceptance pending.
+Status: Code implemented and real Supabase migration applied; signed-in local acceptance pending.
 
 Selected bounded window: use the existing chat for daily planning, automatically
 maintain the three application-owned memory homes, and review task creation,
@@ -27,9 +27,14 @@ of the broader planning/proposal engine and research integrations.
   PostgreSQL tests of the actual migration (including prior-handoff coverage);
   real Hermes tool calls, continuing-session recall and fresh-session recovery
   from the app memory packet. Synthetic test data never entered real user state.
-- Activation gate: apply `20260912000000_assistant_daily_planning.sql` to the
-  existing Personal OS Supabase project and sign in locally. No migration access
-  was configured in the checkout; the signed-in end-to-end acceptance is pending.
+- Database activated 2026-09-12: the supplied session-pooler password worked;
+  verified the app project and task schema/triggers, then applied only
+  `20260912000000_assistant_daily_planning.sql` atomically. Verified nine ownership
+  policies, RLS, denied anonymous writes and private helper permissions. No CLI
+  migration-history baseline exists; see the direct-SQL receipt in `ASSISTANT_LOCAL.md`.
+- Remaining acceptance gate: sign in at localhost. The observed test-account login
+  landed on the hosted Vercel site; localhost remains signed out. Local server was
+  restarted and the anonymous assistant endpoint correctly returns 401.
 - Still deferred: daily-focus mutation, broad proposal batches, full morning brief,
   scheduler, research/SMS, and guaranteed erasure from revisions/native history.
 

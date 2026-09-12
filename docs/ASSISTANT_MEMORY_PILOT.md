@@ -1,7 +1,7 @@
 # Assistant memory pilot
 
-Status: Pilot code implemented 2026-09-12; real Supabase activation and signed-in
-acceptance pending. The design below remains the contract. The former chat-only
+Status: Pilot code implemented and Supabase migration applied 2026-09-12; signed-in
+local acceptance pending. The design below remains the contract. The former chat-only
 runtime has been replaced by the dedicated Hermes adapter; the ordinary Hermes
 profile is unchanged.
 
@@ -34,8 +34,10 @@ that adapter. A second different harness has not yet been exercised.
 Verified: actual PostgreSQL schema/RLS/approval/revision tests; Central-time day
 boundaries; live fictional Hermes tool writes and continuing recall; a fresh Hermes
 session recovering the three-home packet without the prior runtime conversation.
-Real signed-in UI memory/task writes and closeout/opening still require the
-migration to be applied. See `ASSISTANT_LOCAL.md` for activation and pilot limits.
+The real project now has all nine assistant tables with ownership policies and
+verified restricted function grants. Signed-in UI memory/task writes and
+closeout/opening remain unverified because localhost is signed out. See
+`ASSISTANT_LOCAL.md` for the activation receipt and pilot limits.
 
 ## Purpose and ownership
 
@@ -242,7 +244,8 @@ precedence and visible reconciliation rather than prescribing its internals.
 Do not disable the existing personal Hermes profile or import its private notes
 wholesale. Any selected imports need review, source attribution and deduplication.
 Hermes documents independent flags for these built-in stores; an external provider
-can remain enabled. The native tool adapter is implemented and tested in isolation; real database activation remains pending.
+can remain enabled. The native tool adapter is implemented and tested in isolation;
+the real database migration is installed, with signed-in browser acceptance pending.
 
 Successor instruction:
 
