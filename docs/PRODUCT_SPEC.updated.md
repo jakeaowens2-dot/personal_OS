@@ -80,6 +80,13 @@ Deferred but still valid:
 - Calendar/email/GitHub/external actions.
 - Team or multi-user company workflow.
 
+Authentication follow-up (2026-09-12): shared sign-in defaults to email/password,
+with magic links optional. Account settings support authenticated password setup
+and changes; signed-out recovery sends one email. Existing Supabase account identity
+and data ownership remain authoritative. Initial password setup requires a valid
+session or recovery link; routine password sign-in does not send mail. Implemented
+locally; hosted release and real credential acceptance remain pending.
+
 Assistant pilot code (2026-09-12): durable authenticated chat, versioned preferences/
 daily notes/ongoing priorities, native Hermes tools, daily views and handoffs, and
 reviewed task creation/status/priority/progress updates. The additive schema is in

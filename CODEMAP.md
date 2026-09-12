@@ -242,7 +242,8 @@ Current file:
 ### Auth UI
 
 Current files:
-- `src/components/auth/EmailAuthPanel.tsx` renders the quiet email magic-link sign-in prompt used by Home and Task Vault.
+- `src/components/auth/EmailAuthPanel.tsx` provides password-first sign-in with optional magic links for Home, Task Vault, and agent context.
+- `src/app/settings/account/page.tsx` provides authenticated password setup/change and signed-out recovery email requests.
 - `src/lib/workspace.ts` now requires an existing authenticated Supabase user instead of creating anonymous users automatically.
 
 ### Overview layout

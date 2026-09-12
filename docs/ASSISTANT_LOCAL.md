@@ -25,6 +25,12 @@ run an unreviewed bulk `db push`. Existing tasks and ledger data were not change
    triggers. Do not replay unrelated migrations or reset the database.
 2. Run `npm run assistant` and open <http://localhost:3016/assistant>.
 3. Sign in on Home at that same localhost origin, then return to the assistant.
+   Password sign-in is the default; magic links remain optional. Use Home Settings
+   → Account password (`/settings/account`) to set/change a password while signed
+   in, or request a one-time recovery email when signed out. Recovery requires
+   `http://localhost:3016/settings/account` in Supabase Auth's redirect allowlist
+   (and the hosted equivalent when deployed). A magic-link-only account still needs
+   an authenticated session or recovery email before its first password is set.
    Authentication is required for durable planning. The old browser-only archive
    remains exportable under Details; it is not silently imported as new facts.
 4. Try a real planning exchange: name a continuing priority and why, give a progress

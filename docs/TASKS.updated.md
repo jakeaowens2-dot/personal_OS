@@ -11,6 +11,16 @@ When a task is completed:
 
 ## Current priority — daily-planning assistant pilot (2026-09-12)
 
+Password sign-in follow-up (2026-09-12): implemented password-first shared sign-in,
+optional magic links, and `/settings/account` for authenticated password setup/change
+or a one-time recovery email. Home Settings links to Account password. Uses existing
+Supabase Auth and the same account/session/RLS; no new users, admin auth bypass, or
+schema changes. Typecheck/lint and assistant regression tests pass; browser verified
+password/magic modes and signed-out recovery. Actual credential setup/sign-in remains
+user acceptance, and hosted deployment is not included. Recovery requires the exact
+origin's `/settings/account` URL in Supabase's redirect allowlist; email limits still
+apply to recovery, not ordinary password sign-in.
+
 Status: Code implemented and real Supabase migration applied; signed-in local acceptance pending.
 
 Selected bounded window: use the existing chat for daily planning, automatically
