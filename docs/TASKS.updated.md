@@ -9,6 +9,15 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Recent activity ordering (2026-09-13) — Submission time instead of effective date
+
+Status: Complete
+
+Recent Activity now sorts new ledger entries by a durable submission timestamp and
+behavior events by their database creation timestamp. Effective dates still drive
+accounting, weekly placement, and Full History ordering. This keeps backdated reward,
+work, and behavior entries visible immediately without changing their economic date.
+
 ## History controls (2026-09-10) — Edit and delete full-ledger activity
 
 Status: Complete

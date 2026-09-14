@@ -42,6 +42,11 @@ export function dedupeLedgerEvents(ledgerEvents: LedgerEvent[]) {
   });
 }
 
+export function getLedgerEventRecordedAt(event: LedgerEvent) {
+  const recordedAt = event.metadata?.recorded_at;
+  return typeof recordedAt === "string" ? recordedAt : event.created_at;
+}
+
 export function createLocalCompletionArtifacts({
   completedAt = new Date(),
   durationMinutes,
@@ -91,6 +96,7 @@ export function createLocalCompletionArtifacts({
       work_block_id: workBlock.id,
       mode,
       duration_minutes: resolvedDurationMinutes,
+      recorded_at: endedAt,
     },
     created_at: endedAt,
   };

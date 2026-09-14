@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { TaskPriorityLabel } from "@/components/ui/TaskPriorityLabel";
-import { dedupeLedgerEvents } from "@/lib/ledger";
+import { dedupeLedgerEvents, getLedgerEventRecordedAt } from "@/lib/ledger";
 import {
   computeScreenTimePenalty,
   fetchBehaviorEvents,
@@ -678,7 +678,7 @@ export default function HomePage() {
       const ledgerItems = dedupedLedgerEvents.map((event) => ({ kind: "ledger" as const, event }));
       const behaviorItems = behaviorEvents.map((event) => ({ kind: "behavior" as const, event }));
       const timestampOf = (item: ActivityItem) =>
-        item.kind === "ledger" ? item.event.created_at : item.event.occurred_at;
+        item.kind === "ledger" ? getLedgerEventRecordedAt(item.event) : item.event.created_at;
 
       return [...ledgerItems, ...behaviorItems]
         .sort((left, right) => timestampOf(right).localeCompare(timestampOf(left)))

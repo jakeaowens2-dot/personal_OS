@@ -163,7 +163,7 @@ Current files:
 ### Ledger behavior
 
 Current files:
-- `src/lib/ledger.ts`
+- `src/lib/ledger.ts` deduplicates ledger entries and resolves their submission timestamp for Recent Activity.
 - `src/lib/history.ts` pages merged ledger and behavior history using timestamp cursors.
 - `src/components/ledger/EditableHistoryLedger.tsx` provides edit/delete dialogs for the full history route.
 - `src/lib/workspace.ts` handles Supabase-backed workspace session bootstrap, loading, and completion persistence.

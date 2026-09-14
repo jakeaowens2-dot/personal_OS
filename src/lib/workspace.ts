@@ -245,6 +245,7 @@ export async function persistManualWorkBlock(
   { artifactIds = createManualWorkArtifactIds(), completedAt, durationMinutes, note, userId }: PersistManualWorkBlockInput,
 ) {
   const endedAt = completedAt;
+  const recordedAt = new Date().toISOString();
   const startedAt = new Date(new Date(completedAt).getTime() - durationMinutes * 60 * 1000).toISOString();
   const timerSessionId = artifactIds.timerSessionId;
 
@@ -283,6 +284,7 @@ export async function persistManualWorkBlock(
       mode: "work",
       duration_minutes: durationMinutes,
       note: note?.trim() || null,
+      recorded_at: recordedAt,
     },
     created_at: endedAt,
   };
@@ -322,6 +324,7 @@ export async function persistRewardSpend(
   supabase: SupabaseClient,
   { costWorkBlocks, notes, redeemedAt, rewardMinutes, rewardName, userId }: PersistRewardSpendInput,
 ) {
+  const recordedAt = new Date().toISOString();
   const rewardRule: RewardRule = {
     id: crypto.randomUUID(),
     user_id: userId,
@@ -372,6 +375,7 @@ export async function persistRewardSpend(
       reward_name: rewardName.trim(),
       reward_minutes: rewardMinutes,
       notes: notes?.trim() || null,
+      recorded_at: recordedAt,
     },
     created_at: redeemedAt,
   };
