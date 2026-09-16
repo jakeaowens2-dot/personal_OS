@@ -37,6 +37,7 @@ src/
       Badge.tsx
       Button.tsx
       Card.tsx
+      DayOffsetSelector.tsx
       Dialog.tsx
       PopoverMenu.tsx
       StatCard.tsx
@@ -44,6 +45,7 @@ src/
   lib/
     behaviors.ts
     cn.ts
+    dates.ts
     economy.ts
     history.ts
     ledger.ts
@@ -207,8 +209,10 @@ Task storage files:
 
 ### Shared UI helpers
 
-Current file:
+Current files:
 - `src/lib/cn.ts`
+- `src/lib/dates.ts` provides local-calendar day offsets and effective timestamps.
+- `src/components/ui/DayOffsetSelector.tsx` is the shared past-day arrow selector for effective-dated entries.
 
 ### Auth UI
 

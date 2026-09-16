@@ -79,11 +79,19 @@ type SoftDeleteInput = {
 
 type UpdateManualWorkEntryInput = {
   actorLabel: string;
+  completedAt: string;
   durationMinutes: number;
   ledgerEvent: LedgerEvent;
   note?: string;
   selections: WorkBlockAttributionSelection[];
   userId: string;
+};
+
+type UpdateWorkEventDateInput = {
+  completedAt: string;
+  ledgerEvent: LedgerEvent;
+  userId: string;
+  workBlock: WorkBlock;
 };
 
 type UpdateRewardSpendEntryInput = {
@@ -586,9 +594,62 @@ export async function fetchAttributionSelectionsForWorkBlock(
   }));
 }
 
+export async function updateWorkEventDate(
+  supabase: SupabaseClient,
+  { completedAt, ledgerEvent, userId, workBlock }: UpdateWorkEventDateInput,
+) {
+  const timerSessionId = getMetadataString(ledgerEvent.metadata, "timer_session_id");
+
+  if (!timerSessionId) {
+    throw new Error("This work event is missing its linked timer session and cannot be redated safely.");
+  }
+
+  const startedAt = new Date(
+    new Date(completedAt).getTime() - workBlock.duration_minutes * 60 * 1000,
+  ).toISOString();
+
+  const { error: timerSessionError } = await supabase
+    .from("timer_sessions")
+    .update({ ended_at: completedAt, started_at: startedAt })
+    .eq("id", timerSessionId)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (timerSessionError) {
+    throw new Error(toErrorMessage(timerSessionError, "Could not update the work session date."));
+  }
+
+  const { error: workBlockError } = await supabase
+    .from("work_blocks")
+    .update({ earned_at: completedAt })
+    .eq("id", workBlock.id)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (workBlockError) {
+    throw new Error(toErrorMessage(workBlockError, "Could not update the work block date."));
+  }
+
+  const { error: ledgerEventError } = await supabase
+    .from("ledger_events")
+    .update({ created_at: completedAt })
+    .eq("id", ledgerEvent.id)
+    .eq("user_id", userId)
+    .is("deleted_at", null);
+
+  if (ledgerEventError) {
+    throw new Error(toErrorMessage(ledgerEventError, "Could not update the work ledger date."));
+  }
+
+  return {
+    ledgerEvent: { ...ledgerEvent, created_at: completedAt },
+    workBlock: { ...workBlock, earned_at: completedAt },
+  };
+}
+
 export async function updateManualWorkEntry(
   supabase: SupabaseClient,
-  { actorLabel, durationMinutes, ledgerEvent, note, selections, userId }: UpdateManualWorkEntryInput,
+  { actorLabel, completedAt, durationMinutes, ledgerEvent, note, selections, userId }: UpdateManualWorkEntryInput,
 ) {
   const timerSessionId = getMetadataString(ledgerEvent.metadata, "timer_session_id");
   const workBlockId = getMetadataString(ledgerEvent.metadata, "work_block_id");
@@ -597,7 +658,7 @@ export async function updateManualWorkEntry(
     throw new Error("This work event is missing its linked session records and cannot be edited safely.");
   }
 
-  const endedAt = ledgerEvent.created_at;
+  const endedAt = completedAt;
   const startedAt = new Date(new Date(endedAt).getTime() - durationMinutes * 60 * 1000).toISOString();
 
   const { error: timerSessionError } = await supabase
@@ -648,6 +709,7 @@ export async function updateManualWorkEntry(
   const { error: ledgerEventError } = await supabase
     .from("ledger_events")
     .update({
+      created_at: endedAt,
       metadata: updatedLedgerMetadata,
     })
     .eq("id", ledgerEvent.id)
@@ -662,6 +724,7 @@ export async function updateManualWorkEntry(
     durationMinutes,
     ledgerEvent: {
       ...ledgerEvent,
+      created_at: endedAt,
       metadata: updatedLedgerMetadata,
     },
     selections,

@@ -9,6 +9,15 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Work attribution dates (2026-09-16) — Effective-day selector
+
+Status: Complete
+
+Completed-session attribution, manual work creation, and manual work edits now expose
+the same previous/next-day arrow selector used by reward spending. The selected day
+updates the linked timer session, work block, ledger event, and attribution timestamps
+together while preserving the separate submission timestamp used by Recent Activity.
+
 ## Recent activity ordering (2026-09-13) — Submission time instead of effective date
 
 Status: Complete

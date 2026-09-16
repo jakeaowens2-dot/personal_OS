@@ -10,10 +10,12 @@ import { WeeklyOverview } from "@/components/overview/WeeklyOverview";
 import { PomodoroTimer, type SessionEndInfo, type TimerStatus } from "@/components/timer/PomodoroTimer";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { DayOffsetSelector } from "@/components/ui/DayOffsetSelector";
 import { Dialog } from "@/components/ui/Dialog";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { TaskPriorityLabel } from "@/components/ui/TaskPriorityLabel";
 import { dedupeLedgerEvents, getLedgerEventRecordedAt } from "@/lib/ledger";
+import { getDayOffsetFromTimestamp, getTimestampForDayOffset } from "@/lib/dates";
 import {
   computeScreenTimePenalty,
   fetchBehaviorEvents,
@@ -68,6 +70,7 @@ import {
   persistWorkBlockAttributions,
   updateManualWorkEntry,
   updateRewardSpendEntry,
+  updateWorkEventDate,
   type ManualWorkArtifactIds,
 } from "@/lib/workspace";
 import { archiveTask, completeDailyFocusItem, completeTask, dropDailyFocusItem, removeTaskFromDailyFocus } from "@/lib/tasks";
@@ -111,6 +114,7 @@ type AttributionSelectionState = {
 };
 
 type AttributionDialogState = AttributionSelectionState & {
+  dayOffset: number;
   ledgerEvent: LedgerEvent;
   workBlock: WorkBlock;
 };
@@ -272,22 +276,6 @@ function getRewardReportDate(dayOffset: number) {
   date.setHours(12, 0, 0, 0);
   date.setDate(date.getDate() + dayOffset);
   return date;
-}
-
-function formatRewardReportDate(dayOffset: number) {
-  if (dayOffset === 0) {
-    return "Today";
-  }
-
-  if (dayOffset === -1) {
-    return "Yesterday";
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-  }).format(getRewardReportDate(dayOffset));
 }
 
 type ActionFieldProps = {
@@ -567,6 +555,7 @@ export default function HomePage() {
   const [manualWorkDialogMode, setManualWorkDialogMode] = useState<ManualWorkDialogMode>({ kind: "create" });
   const [manualWorkMinutes, setManualWorkMinutes] = useState("50");
   const [manualWorkNote, setManualWorkNote] = useState("");
+  const [manualWorkDayOffset, setManualWorkDayOffset] = useState(0);
   const [isManualDialogOpen, setIsManualDialogOpen] = useState(false);
   const [isManualWorkSaving, setIsManualWorkSaving] = useState(false);
   const [isAttributionSaving, setIsAttributionSaving] = useState(false);
@@ -911,14 +900,6 @@ export default function HomePage() {
     }
   };
 
-  const getRewardDayOffsetFromTimestamp = (isoTimestamp: string) => {
-    const target = new Date(isoTimestamp);
-    target.setHours(12, 0, 0, 0);
-    const today = getRewardReportDate(0);
-    const millisPerDay = 24 * 60 * 60 * 1000;
-    return Math.round((target.getTime() - today.getTime()) / millisPerDay);
-  };
-
   const prepareAttributionSelectionState = async ({
     preselectedTaskIds,
   }: {
@@ -978,6 +959,7 @@ export default function HomePage() {
       attributionIdsByTaskIdRef.current = {};
       const selectionState = await prepareAttributionSelectionState();
       setAttributionDialogState({
+        dayOffset: getDayOffsetFromTimestamp(ledgerEvent.created_at),
         ledgerEvent,
         workBlock,
         ...selectionState,
@@ -1014,6 +996,7 @@ export default function HomePage() {
       setManualWorkDialogMode({ kind: "create" });
       setManualWorkMinutes("50");
       setManualWorkNote("");
+      setManualWorkDayOffset(0);
       setManualAttributionState(selectionState);
       setIsManualDialogOpen(true);
       setPersistenceState({
@@ -1211,6 +1194,10 @@ export default function HomePage() {
       if (manualWorkDialogMode.kind === "edit") {
         await updateManualWorkEntry(supabase, {
           actorLabel: "Manual work edit",
+          completedAt: getTimestampForDayOffset(
+            manualWorkDayOffset,
+            manualWorkDialogMode.ledgerEvent.created_at,
+          ),
           durationMinutes,
           ledgerEvent: manualWorkDialogMode.ledgerEvent,
           note: manualWorkNote,
@@ -1222,8 +1209,12 @@ export default function HomePage() {
         const submission = manualWorkSubmissionRef.current ?? {
           artifactIds: createManualWorkArtifactIds(),
           attributionIdsByTaskId: {},
-          completedAt: new Date().toISOString(),
+          completedAt: getTimestampForDayOffset(manualWorkDayOffset),
         };
+        submission.completedAt = getTimestampForDayOffset(
+          manualWorkDayOffset,
+          submission.completedAt,
+        );
         manualWorkSubmissionRef.current = submission;
         const attributionIds = selections.map((selection) => {
           const existingId = submission.attributionIdsByTaskId[selection.taskId];
@@ -1260,6 +1251,7 @@ export default function HomePage() {
       await reloadDailyFocusItems(workspaceUserId);
       setManualWorkNote("");
       setManualWorkMinutes("50");
+      setManualWorkDayOffset(0);
       const createdTasksThisTurn = manualAttributionState.createdTasksThisTurn;
       setManualAttributionState(null);
       manualWorkSubmissionRef.current = null;
@@ -1932,6 +1924,7 @@ export default function HomePage() {
         });
         setManualWorkMinutes(String(defaults.durationMinutes));
         setManualWorkNote(defaults.note ?? "");
+        setManualWorkDayOffset(getDayOffsetFromTimestamp(event.created_at));
         setIsManualDialogOpen(true);
         setPersistenceState({
           kind: "ready",
@@ -1952,7 +1945,7 @@ export default function HomePage() {
         });
         setRewardHours(String(rewardHoursValue));
         setRewardMinutes(String(rewardMinuteValue));
-        setRewardDayOffset(getRewardDayOffsetFromTimestamp(event.created_at));
+        setRewardDayOffset(getDayOffsetFromTimestamp(event.created_at));
         setRewardNote(defaults.notes);
         setIsRewardDialogOpen(true);
         setPersistenceState({
@@ -2070,21 +2063,24 @@ export default function HomePage() {
         return id;
       });
 
-      const result = await persistWorkBlockAttributions(supabase, {
+      const datedWork = await updateWorkEventDate(supabase, {
+        completedAt: getTimestampForDayOffset(
+          attributionDialogState.dayOffset,
+          attributionDialogState.ledgerEvent.created_at,
+        ),
+        ledgerEvent: attributionDialogState.ledgerEvent,
+        userId: workspaceUserId,
+        workBlock: attributionDialogState.workBlock,
+      });
+      await persistWorkBlockAttributions(supabase, {
         attributionIds,
         durationMinutes: attributionDialogState.workBlock.duration_minutes,
-        ledgerEvent: attributionDialogState.ledgerEvent,
+        ledgerEvent: datedWork.ledgerEvent,
         selections,
         userId: workspaceUserId,
         workBlockId: attributionDialogState.workBlock.id,
       });
-
-      setLocalLedgerState((current) => ({
-        ...current,
-        ledgerEvents: current.ledgerEvents.map((event) =>
-          event.id === result.ledgerEvent.id ? result.ledgerEvent : event,
-        ),
-      }));
+      await reloadWorkspaceData(workspaceUserId);
       await reloadDailyFocusItems(workspaceUserId);
       const createdTasksThisTurn = attributionDialogState.createdTasksThisTurn;
       setAttributionDialogState(null);
@@ -2429,6 +2425,7 @@ export default function HomePage() {
           setManualWorkDialogMode({ kind: "create" });
           setManualWorkMinutes("50");
           setManualWorkNote("");
+          setManualWorkDayOffset(0);
         }}
         open={isManualDialogOpen}
         title={manualWorkDialogMode.kind === "edit" ? "Edit work block" : "Add missed work"}
@@ -2451,6 +2448,13 @@ export default function HomePage() {
                 value={manualWorkNote}
               />
             </div>
+
+            <DayOffsetSelector
+              disabled={isManualWorkSaving}
+              label="Day of work block"
+              onChange={setManualWorkDayOffset}
+              value={manualWorkDayOffset}
+            />
 
             <AttributionFields
               availableTasks={manualAttributionState.availableTasks}
@@ -2517,34 +2521,11 @@ export default function HomePage() {
               />
             </div>
           </div>
-          <div className="space-y-2">
-            <span className="text-sm text-slate-600">Day of reward block</span>
-            <div className="flex items-center justify-between rounded-2xl border border-slate-300/80 bg-white/80 px-4 py-3">
-              <Button
-                className="text-slate-500"
-                onClick={() => setRewardDayOffset((current) => current - 1)}
-                size="inline"
-                variant="text"
-              >
-                ←
-              </Button>
-              <span className="text-sm font-medium text-slate-900">
-                {formatRewardReportDate(rewardDayOffset)}
-              </span>
-              {rewardDayOffset < 0 ? (
-                <Button
-                  className="text-slate-500"
-                  onClick={() => setRewardDayOffset((current) => Math.min(current + 1, 0))}
-                  size="inline"
-                  variant="text"
-                >
-                  →
-                </Button>
-              ) : (
-                <span className="w-4" />
-              )}
-            </div>
-          </div>
+          <DayOffsetSelector
+            label="Day of reward block"
+            onChange={setRewardDayOffset}
+            value={rewardDayOffset}
+          />
           <ActionField
             label="Note"
             onChange={(event) => setRewardNote(event.target.value)}
@@ -2571,6 +2552,14 @@ export default function HomePage() {
             <p className="text-sm leading-6 text-slate-600">
               Split this completed work block across the tasks it supported.
             </p>
+            <DayOffsetSelector
+              disabled={isAttributionSaving}
+              label="Day of work block"
+              onChange={(dayOffset) =>
+                setAttributionDialogState((current) => current ? { ...current, dayOffset } : current)
+              }
+              value={attributionDialogState.dayOffset}
+            />
             <AttributionFields
               availableTasks={attributionDialogState.availableTasks}
               choresTask={attributionDialogState.choresTask}

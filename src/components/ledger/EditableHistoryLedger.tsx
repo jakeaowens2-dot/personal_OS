@@ -4,12 +4,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { useState, type InputHTMLAttributes } from "react";
 import { LedgerEventList } from "@/components/ledger/LedgerEventList";
 import { Button } from "@/components/ui/Button";
+import { DayOffsetSelector } from "@/components/ui/DayOffsetSelector";
 import { Dialog } from "@/components/ui/Dialog";
 import {
   hardDeleteBehaviorEvent,
   updateBehaviorEvent,
 } from "@/lib/behaviors";
 import { WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK } from "@/lib/economy";
+import { getDayOffsetFromTimestamp, getTimestampForDayOffset } from "@/lib/dates";
 import type { ActivityItem } from "@/lib/history";
 import type { BehaviorType, LedgerEvent } from "@/lib/types";
 import {
@@ -81,6 +83,7 @@ export function EditableHistoryLedger({
   const [deleteTarget, setDeleteTarget] = useState<ActivityItem | null>(null);
   const [durationMinutes, setDurationMinutes] = useState("");
   const [eventDate, setEventDate] = useState("");
+  const [workDayOffset, setWorkDayOffset] = useState(0);
   const [note, setNote] = useState("");
   const [rewardName, setRewardName] = useState("");
   const [behaviorType, setBehaviorType] = useState<BehaviorType>("indulgence");
@@ -113,6 +116,7 @@ export function EditableHistoryLedger({
       setDurationMinutes(String(defaults.durationMinutes));
       setNote(defaults.note ?? "");
       setEventDate(toDateInputValue(event.created_at));
+      setWorkDayOffset(getDayOffsetFromTimestamp(event.created_at));
       setRewardName("");
       setEditTarget({ kind: "ledger", event });
       return;
@@ -200,6 +204,7 @@ export function EditableHistoryLedger({
 
         const updated = await updateManualWorkEntry(supabase, {
           actorLabel: "Full history edit",
+          completedAt: getTimestampForDayOffset(workDayOffset, editTarget.event.created_at),
           durationMinutes: parsedMinutes,
           ledgerEvent: editTarget.event,
           note,
@@ -243,6 +248,7 @@ export function EditableHistoryLedger({
 
   const editingReward = editTarget?.kind === "ledger" && editTarget.event.event_type === "reward_spent";
   const editingBehavior = editTarget?.kind === "behavior";
+  const editingWork = editTarget?.kind === "ledger" && editTarget.event.event_type === "work_earned";
 
   return (
     <>
@@ -314,6 +320,15 @@ export function EditableHistoryLedger({
               onChange={(event) => setEventDate(event.target.value)}
               type="date"
               value={eventDate}
+            />
+          ) : null}
+
+          {editingWork ? (
+            <DayOffsetSelector
+              disabled={isSaving}
+              label="Day of work block"
+              onChange={setWorkDayOffset}
+              value={workDayOffset}
             />
           ) : null}
 
