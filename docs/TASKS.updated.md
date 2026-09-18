@@ -9,6 +9,15 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Completed work editing (2026-09-18) — Timer and manual blocks
+
+Status: Complete
+
+Recent Activity and Full History now expose Edit for both manual and timer-completed
+work blocks. Edits preserve the original event source and work-block tag, update the
+effective day, duration, note, and task attribution timestamps, and recalculate the
+ledger work-block delta when duration changes.
+
 ## Healthy behaviors (2026-09-17) — Once-daily positive tracking
 
 Status: Complete

@@ -170,7 +170,7 @@ Current files:
 - `src/lib/history.ts` pages merged ledger and behavior history using timestamp cursors.
 - `src/components/ledger/EditableHistoryLedger.tsx` provides edit/delete dialogs for the full history route.
 - `src/lib/workspace.ts` handles Supabase-backed workspace session bootstrap, loading, and completion persistence.
-- `src/lib/workspace.ts` also persists post-completion work-block attribution and updates ledger metadata with readable task summaries.
+- `src/lib/workspace.ts` also persists and edits manual/timer work blocks, their task attributions, and readable ledger summaries.
 - `src/components/ledger/LedgerEventList.tsx` now exposes recent-activity edit/delete actions for supported ledger events.
 
 Planned files:

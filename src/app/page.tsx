@@ -60,7 +60,7 @@ import {
   ensureWorkspaceUser,
   fetchAttributionSelectionsForWorkBlock,
   fetchWorkspaceData,
-  getManualWorkDefaultsFromLedgerEvent,
+  getWorkDefaultsFromLedgerEvent,
   getRewardSpendDefaultsFromLedgerEvent,
   hardDeleteLedgerEvent,
   hardResetWorkspace,
@@ -69,7 +69,7 @@ import {
   persistManualWorkBlock,
   persistRewardSpend,
   persistWorkBlockAttributions,
-  updateManualWorkEntry,
+  updateWorkEntry,
   updateRewardSpendEntry,
   updateWorkEventDate,
   type ManualWorkArtifactIds,
@@ -1197,15 +1197,19 @@ export default function HomePage() {
     setIsManualWorkSaving(true);
     setPersistenceState({
       kind: "saving",
-      message: "Saving manual work block and attribution...",
+      message: manualWorkDialogMode.kind === "edit"
+        ? "Saving work block changes..."
+        : "Saving manual work block and attribution...",
     });
 
     try {
       const selections = buildAttributionSelections(manualAttributionState);
 
       if (manualWorkDialogMode.kind === "edit") {
-        await updateManualWorkEntry(supabase, {
-          actorLabel: "Manual work edit",
+        await updateWorkEntry(supabase, {
+          actorLabel: manualWorkDialogMode.ledgerEvent.source === "pomodoro_timer"
+            ? "Completed work edit"
+            : "Manual work edit",
           completedAt: getTimestampForDayOffset(
             manualWorkDayOffset,
             manualWorkDialogMode.ledgerEvent.created_at,
@@ -1272,7 +1276,7 @@ export default function HomePage() {
       setPersistenceState({
         kind: "saved",
         message: manualWorkDialogMode.kind === "edit"
-          ? "Manual work block updated"
+          ? "Work block updated"
           : "Manual work block saved and attributed",
       });
       if (createdTasksThisTurn.length > 0) {
@@ -1288,7 +1292,7 @@ export default function HomePage() {
     } catch (error) {
       setPersistenceState({
         kind: "error",
-        message: error instanceof Error ? error.message : "Could not save the manual work block.",
+        message: error instanceof Error ? error.message : "Could not save the work block.",
       });
     } finally {
       manualWorkSaveInFlightRef.current = false;
@@ -1918,11 +1922,14 @@ export default function HomePage() {
     }
 
     try {
-      if (event.event_type === "work_earned" && event.source === "manual_entry") {
-        const defaults = getManualWorkDefaultsFromLedgerEvent(event);
+      if (
+        event.event_type === "work_earned" &&
+        (event.source === "manual_entry" || event.source === "pomodoro_timer")
+      ) {
+        const defaults = getWorkDefaultsFromLedgerEvent(event);
 
         if (!defaults.workBlockId || !defaults.durationMinutes) {
-          throw new Error("This manual work event is missing its linked work block details.");
+          throw new Error("This work event is missing its linked work block details.");
         }
 
         const selections = await fetchAttributionSelectionsForWorkBlock(supabase, {
@@ -1947,7 +1954,7 @@ export default function HomePage() {
         setIsManualDialogOpen(true);
         setPersistenceState({
           kind: "ready",
-          message: "Editing manual work block",
+          message: "Editing work block",
         });
         return;
       }

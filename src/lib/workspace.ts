@@ -77,7 +77,7 @@ type SoftDeleteInput = {
   userId: string;
 };
 
-type UpdateManualWorkEntryInput = {
+type UpdateWorkEntryInput = {
   actorLabel: string;
   completedAt: string;
   durationMinutes: number;
@@ -426,7 +426,7 @@ function buildDeletedFields(actorLabel: string, deletionReason: string) {
   };
 }
 
-function buildManualWorkLedgerMetadata({
+function buildWorkLedgerMetadata({
   durationMinutes,
   ledgerEvent,
   note,
@@ -534,7 +534,7 @@ export async function persistWorkBlockAttributions(
     );
   }
 
-  const updatedLedgerMetadata = buildManualWorkLedgerMetadata({
+  const updatedLedgerMetadata = buildWorkLedgerMetadata({
     durationMinutes,
     ledgerEvent,
     note,
@@ -647,9 +647,9 @@ export async function updateWorkEventDate(
   };
 }
 
-export async function updateManualWorkEntry(
+export async function updateWorkEntry(
   supabase: SupabaseClient,
-  { actorLabel, completedAt, durationMinutes, ledgerEvent, note, selections, userId }: UpdateManualWorkEntryInput,
+  { actorLabel, completedAt, durationMinutes, ledgerEvent, note, selections, userId }: UpdateWorkEntryInput,
 ) {
   const timerSessionId = getMetadataString(ledgerEvent.metadata, "timer_session_id");
   const workBlockId = getMetadataString(ledgerEvent.metadata, "work_block_id");
@@ -667,14 +667,14 @@ export async function updateManualWorkEntry(
       planned_minutes: durationMinutes,
       started_at: startedAt,
       ended_at: endedAt,
-      notes: note?.trim() || "Manual work block entry",
+      notes: note?.trim() || (ledgerEvent.source === "manual_entry" ? "Manual work block entry" : null),
     })
     .eq("id", timerSessionId)
     .eq("user_id", userId)
     .is("deleted_at", null);
 
   if (timerSessionError) {
-    throw new Error(toErrorMessage(timerSessionError, "Could not update the manual timer session."));
+    throw new Error(toErrorMessage(timerSessionError, "Could not update the timer session."));
   }
 
   const { error: workBlockError } = await supabase
@@ -682,14 +682,13 @@ export async function updateManualWorkEntry(
     .update({
       duration_minutes: durationMinutes,
       earned_at: endedAt,
-      tag: "manual",
     })
     .eq("id", workBlockId)
     .eq("user_id", userId)
     .is("deleted_at", null);
 
   if (workBlockError) {
-    throw new Error(toErrorMessage(workBlockError, "Could not update the manual work block."));
+    throw new Error(toErrorMessage(workBlockError, "Could not update the work block."));
   }
 
   await softDeleteAttributionsForWorkBlock(supabase, {
@@ -699,7 +698,7 @@ export async function updateManualWorkEntry(
     workBlockId,
   });
 
-  const updatedLedgerMetadata = buildManualWorkLedgerMetadata({
+  const updatedLedgerMetadata = buildWorkLedgerMetadata({
     durationMinutes,
     ledgerEvent,
     note,
@@ -710,6 +709,7 @@ export async function updateManualWorkEntry(
     .from("ledger_events")
     .update({
       created_at: endedAt,
+      delta_work_blocks: workBlockDeltaForDuration(durationMinutes),
       metadata: updatedLedgerMetadata,
     })
     .eq("id", ledgerEvent.id)
@@ -725,6 +725,7 @@ export async function updateManualWorkEntry(
     ledgerEvent: {
       ...ledgerEvent,
       created_at: endedAt,
+      delta_work_blocks: workBlockDeltaForDuration(durationMinutes),
       metadata: updatedLedgerMetadata,
     },
     selections,
@@ -1049,7 +1050,8 @@ export async function softDeleteRewardSpendEvent(
 
 export function isEditableLedgerEvent(event: LedgerEvent) {
   return (
-    (event.event_type === "work_earned" && event.source === "manual_entry") ||
+    (event.event_type === "work_earned" &&
+      (event.source === "manual_entry" || event.source === "pomodoro_timer")) ||
     (event.event_type === "reward_spent" && event.source === "manual_reward_redemption")
   );
 }
@@ -1062,7 +1064,7 @@ export function isDeletableLedgerEvent(event: LedgerEvent) {
   return event.event_type === "work_earned" && (event.source === "manual_entry" || event.source === "pomodoro_timer");
 }
 
-export function getManualWorkDefaultsFromLedgerEvent(event: LedgerEvent) {
+export function getWorkDefaultsFromLedgerEvent(event: LedgerEvent) {
   return {
     durationMinutes: getMetadataNumber(event.metadata, "duration_minutes"),
     note: getMetadataString(event.metadata, "note"),

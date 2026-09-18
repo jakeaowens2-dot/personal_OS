@@ -16,12 +16,12 @@ import type { ActivityItem } from "@/lib/history";
 import type { BehaviorType, LedgerEvent } from "@/lib/types";
 import {
   fetchAttributionSelectionsForWorkBlock,
-  getManualWorkDefaultsFromLedgerEvent,
+  getWorkDefaultsFromLedgerEvent,
   getRewardSpendDefaultsFromLedgerEvent,
   hardDeleteLedgerEvent,
   isDeletableLedgerEvent,
   isEditableLedgerEvent,
-  updateManualWorkEntry,
+  updateWorkEntry,
   updateRewardSpendEntry,
 } from "@/lib/workspace";
 
@@ -94,11 +94,14 @@ export function EditableHistoryLedger({
   const requestLedgerEdit = async (event: LedgerEvent) => {
     setError(null);
 
-    if (event.event_type === "work_earned" && event.source === "manual_entry") {
-      const defaults = getManualWorkDefaultsFromLedgerEvent(event);
+    if (
+      event.event_type === "work_earned" &&
+      (event.source === "manual_entry" || event.source === "pomodoro_timer")
+    ) {
+      const defaults = getWorkDefaultsFromLedgerEvent(event);
 
       if (!defaults.workBlockId || !defaults.durationMinutes) {
-        setError("This manual work entry is missing its linked work-block details.");
+        setError("This work entry is missing its linked work-block details.");
         return;
       }
 
@@ -202,7 +205,7 @@ export function EditableHistoryLedger({
           throw new Error("This work entry has no saved attribution and cannot be edited safely.");
         }
 
-        const updated = await updateManualWorkEntry(supabase, {
+        const updated = await updateWorkEntry(supabase, {
           actorLabel: "Full history edit",
           completedAt: getTimestampForDayOffset(workDayOffset, editTarget.event.created_at),
           durationMinutes: parsedMinutes,
