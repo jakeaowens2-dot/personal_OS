@@ -1,8 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { usesEconomyPolicyV2 } from "@/lib/economy";
-import type { BehaviorEvent, BehaviorType } from "@/lib/types";
+import type { BehaviorEvent, BehaviorType, HealthyBehaviorType } from "@/lib/types";
 
 export const INDULGENCE_PENALTY_MINUTES = 60;
+
+export function isHealthyBehaviorType(
+  behaviorType: BehaviorType,
+): behaviorType is HealthyBehaviorType {
+  return behaviorType === "waking_routine" || behaviorType === "gallon_water";
+}
 
 const BEHAVIOR_SELECT_COLUMNS = [
   "id",
@@ -26,6 +32,10 @@ export function getBehaviorTypeLabel(behaviorType: BehaviorType) {
       return "Screen time";
     case "exercise":
       return "Exercise";
+    case "waking_routine":
+      return "Waking routine";
+    case "gallon_water":
+      return "1 gallon water";
   }
 }
 
@@ -51,6 +61,8 @@ export function computeBehaviorPenalty(
     case "screen_time":
       return computeScreenTimePenalty(durationMinutes ?? 0, occurredAt);
     case "exercise":
+    case "waking_routine":
+    case "gallon_water":
       return 0;
   }
 }
@@ -89,6 +101,10 @@ export async function persistBehaviorEvent(supabase: SupabaseClient, input: Beha
     .single();
 
   if (error) {
+    if (error.code === "23505" && isHealthyBehaviorType(input.behaviorType)) {
+      throw new Error(`${getBehaviorTypeLabel(input.behaviorType)} is already logged for this day.`);
+    }
+
     throw new Error(error.message || "Could not save the behavior event.");
   }
 
@@ -124,6 +140,10 @@ export async function updateBehaviorEvent(
     .single();
 
   if (error) {
+    if (error.code === "23505" && isHealthyBehaviorType(input.behaviorType)) {
+      throw new Error(`${getBehaviorTypeLabel(input.behaviorType)} is already logged for this day.`);
+    }
+
     throw new Error(error.message || "Could not update the behavior event.");
   }
 
@@ -167,13 +187,17 @@ export function getBehaviorRewardDeltaMinutes(events: BehaviorEvent[]) {
       return total + (event.duration_minutes ?? 0);
     }
 
+    if (isHealthyBehaviorType(event.behavior_type)) {
+      return total;
+    }
+
     return total - (event.penalty_minutes ?? 0);
   }, 0);
 }
 
 export function getBehaviorPenaltyMinutes(events: BehaviorEvent[]) {
   return events.reduce((total, event) => {
-    if (event.behavior_type === "exercise") {
+    if (event.behavior_type === "exercise" || isHealthyBehaviorType(event.behavior_type)) {
       return total;
     }
 

@@ -9,6 +9,15 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Healthy behaviors (2026-09-17) — Once-daily positive tracking
+
+Status: Complete
+
+Behavior Tracking now includes a Healthy behaviors tab for the waking routine
+(first alarm, water, walk) and one gallon of water. Each can be logged once per day,
+uses the exercise/periwinkle activity color, remains editable/deletable in history,
+and intentionally has no reward-balance effect.
+
 ## Work attribution dates (2026-09-16) — Effective-day selector
 
 Status: Complete

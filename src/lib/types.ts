@@ -175,7 +175,9 @@ export type WorkBlockAttribution = {
   deletion_reason?: string | null;
 };
 
-export type BehaviorType = "indulgence" | "screen_time" | "exercise";
+export type HealthyBehaviorType = "waking_routine" | "gallon_water";
+
+export type BehaviorType = "indulgence" | "screen_time" | "exercise" | HealthyBehaviorType;
 
 export type BehaviorEvent = {
   id: string;

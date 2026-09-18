@@ -23,6 +23,7 @@ import {
   getBehaviorTypeLabel,
   hardDeleteBehaviorEvent,
   INDULGENCE_PENALTY_MINUTES,
+  isHealthyBehaviorType,
   persistBehaviorEvent,
   updateBehaviorEvent,
 } from "@/lib/behaviors";
@@ -133,6 +134,7 @@ type BehaviorDialogState = {
   screenTimeDate: string;
   exerciseMinutes: string;
   exerciseDate: string;
+  healthyBehaviorDate: string;
   note: string;
 };
 
@@ -142,8 +144,18 @@ const INITIAL_BEHAVIOR_DIALOG_STATE: BehaviorDialogState = {
   screenTimeDate: "",
   exerciseMinutes: "",
   exerciseDate: "",
+  healthyBehaviorDate: "",
   note: "",
 };
+
+type BehaviorTab = "indulgence" | "screen_time" | "exercise" | "healthy_behaviors";
+
+const BEHAVIOR_TABS: { label: string; value: BehaviorTab }[] = [
+  { label: "Indulgent behavior", value: "indulgence" },
+  { label: "Screen time", value: "screen_time" },
+  { label: "Exercise", value: "exercise" },
+  { label: "Healthy behaviors", value: "healthy_behaviors" },
+];
 
 type PendingSessionEnd = {
   completedAt: string;
@@ -1400,6 +1412,10 @@ export default function HomePage() {
       if (behaviorDialogState.exerciseDate) {
         occurredAt = new Date(`${behaviorDialogState.exerciseDate}T12:00:00`).toISOString();
       }
+    } else if (isHealthyBehaviorType(behaviorDialogState.behaviorType)) {
+      if (behaviorDialogState.healthyBehaviorDate) {
+        occurredAt = new Date(`${behaviorDialogState.healthyBehaviorDate}T12:00:00`).toISOString();
+      }
     }
 
     setPersistenceState({
@@ -1452,6 +1468,9 @@ export default function HomePage() {
       screenTimeDate: event.behavior_type === "screen_time" ? toDateInputValue(event.occurred_at) : "",
       exerciseMinutes: event.behavior_type === "exercise" ? String(event.duration_minutes ?? "") : "",
       exerciseDate: event.behavior_type === "exercise" ? toDateInputValue(event.occurred_at) : "",
+      healthyBehaviorDate: isHealthyBehaviorType(event.behavior_type)
+        ? toDateInputValue(event.occurred_at)
+        : "",
       note: event.note ?? "",
     });
     setIsBehaviorDialogOpen(true);
@@ -2733,20 +2752,28 @@ export default function HomePage() {
         title={behaviorDialogMode.kind === "edit" ? "Edit behavior entry" : "Behavior tracking"}
       >
         <div className="space-y-5">
-          <div className="grid gap-2 sm:grid-cols-3">
-            {(["indulgence", "screen_time", "exercise"] as BehaviorType[]).map((type) => {
-              const selected = behaviorDialogState.behaviorType === type;
+          <div className="grid gap-2 sm:grid-cols-4">
+            {BEHAVIOR_TABS.map((tab) => {
+              const selected = tab.value === "healthy_behaviors"
+                ? isHealthyBehaviorType(behaviorDialogState.behaviorType)
+                : behaviorDialogState.behaviorType === tab.value;
 
               return (
                 <Button
-                  key={type}
+                  key={tab.value}
                   aria-pressed={selected}
                   onClick={() =>
-                    setBehaviorDialogState((current) => ({ ...current, behaviorType: type }))
+                    setBehaviorDialogState((current) => ({
+                      ...current,
+                      behaviorType: tab.value === "healthy_behaviors" ? "waking_routine" : tab.value,
+                      healthyBehaviorDate: tab.value === "healthy_behaviors"
+                        ? current.healthyBehaviorDate || toDateInputValue(new Date().toISOString())
+                        : current.healthyBehaviorDate,
+                    }))
                   }
                   variant={selected ? "primary" : "secondary"}
                 >
-                  {getBehaviorTypeLabel(type)}
+                  {tab.label}
                 </Button>
               );
             })}
@@ -2816,6 +2843,40 @@ export default function HomePage() {
                 }
                 type="number"
                 value={behaviorDialogState.exerciseMinutes}
+              />
+            </div>
+          ) : null}
+
+          {isHealthyBehaviorType(behaviorDialogState.behaviorType) ? (
+            <div className="space-y-3">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(["waking_routine", "gallon_water"] as const).map((type) => {
+                  const selected = behaviorDialogState.behaviorType === type;
+
+                  return (
+                    <Button
+                      key={type}
+                      aria-pressed={selected}
+                      onClick={() =>
+                        setBehaviorDialogState((current) => ({ ...current, behaviorType: type }))
+                      }
+                      variant={selected ? "primary" : "secondary"}
+                    >
+                      {getBehaviorTypeLabel(type)}
+                    </Button>
+                  );
+                })}
+              </div>
+              <ActionField
+                label="Day"
+                onChange={(event) =>
+                  setBehaviorDialogState((current) => ({
+                    ...current,
+                    healthyBehaviorDate: event.target.value,
+                  }))
+                }
+                type="date"
+                value={behaviorDialogState.healthyBehaviorDate}
               />
             </div>
           ) : null}

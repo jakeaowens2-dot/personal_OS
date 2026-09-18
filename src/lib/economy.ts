@@ -175,7 +175,10 @@ export function behaviorEventsToSettlementEvents(events: BehaviorEvent[]): Settl
   for (const event of events) {
     if (event.behavior_type === "exercise") {
       result.push({ kind: "credit", minutes: event.duration_minutes ?? 0, at: event.occurred_at });
-    } else {
+    } else if (
+      event.behavior_type !== "waking_routine" &&
+      event.behavior_type !== "gallon_water"
+    ) {
       result.push({ kind: "penalty", minutes: event.penalty_minutes ?? 0, at: event.occurred_at });
     }
   }

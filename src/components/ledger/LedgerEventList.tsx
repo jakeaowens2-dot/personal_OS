@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/Badge";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
-import { getBehaviorTypeLabel } from "@/lib/behaviors";
+import { getBehaviorTypeLabel, isHealthyBehaviorType } from "@/lib/behaviors";
 import type { ActivityItem } from "@/lib/history";
 import { exercisePalette, penaltyPalette, rewardPalette, timerPalette } from "@/lib/timerPalette";
 import type { BehaviorEvent, LedgerEvent } from "@/lib/types";
@@ -105,6 +105,10 @@ function getBehaviorDeltaLabel(event: BehaviorEvent) {
     return `+${Math.ceil(event.duration_minutes ?? 0)} min reward`;
   }
 
+  if (isHealthyBehaviorType(event.behavior_type)) {
+    return "Completed";
+  }
+
   return `-${Math.ceil(event.penalty_minutes ?? 0)} min reward`;
 }
 
@@ -114,7 +118,9 @@ function getBehaviorDetail(event: BehaviorEvent) {
 }
 
 function getBehaviorSwatchColor(event: BehaviorEvent) {
-  return event.behavior_type === "exercise" ? exercisePalette.progress : penaltyPalette.progress;
+  return event.behavior_type === "exercise" || isHealthyBehaviorType(event.behavior_type)
+    ? exercisePalette.progress
+    : penaltyPalette.progress;
 }
 
 export function LedgerEventList({

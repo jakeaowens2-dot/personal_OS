@@ -295,6 +295,8 @@ export function EditableHistoryLedger({
                 <option value="indulgence">Indulgent behavior</option>
                 <option value="screen_time">Screen time</option>
                 <option value="exercise">Exercise</option>
+                <option value="waking_routine">Waking routine</option>
+                <option value="gallon_water">1 gallon water</option>
               </select>
             </label>
           ) : null}

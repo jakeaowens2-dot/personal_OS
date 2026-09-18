@@ -86,6 +86,7 @@ supabase/
     20260823000000_add_work_block_attribution_delete_policy.sql
     20260823000001_add_behavior_events.sql
     20260905000000_update_screen_time_penalty_economy.sql
+    20260917000000_add_healthy_behaviors.sql
 ```
 
 ## Planned Structure
@@ -198,7 +199,7 @@ Current file:
 ### Behavior tracking
 
 Current files:
-- `src/lib/behaviors.ts` holds behavior events (indulgence, screen time, exercise) and their reward/penalty math, plus edit/delete persistence.
+- `src/lib/behaviors.ts` holds penalty, exercise, and once-daily healthy behavior events, plus edit/delete persistence.
 - `src/components/overview/MiniBlocks.tsx` renders 1-hour blocks with partial-fill support and consequence overlays.
 - `src/components/overview/WeeklyOverview.tsx` renders daily Work / Reward / Penalty columns with two-wide block groups.
 - `src/app/page.tsx` hosts the "Behavior tracking" dialog and mixes behavior events into reward accounting.
