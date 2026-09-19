@@ -29,6 +29,12 @@ export function getTimestampForDayOffset(dayOffset: number, timeSource?: string)
   ).toISOString();
 }
 
+export function getLocalMiddayTimestampForDayOffset(dayOffset: number) {
+  const date = getDateForDayOffset(dayOffset);
+  date.setHours(12, 0, 0, 0);
+  return date.toISOString();
+}
+
 export function formatDayOffset(dayOffset: number) {
   if (dayOffset === 0) {
     return "Today";

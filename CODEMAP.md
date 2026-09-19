@@ -202,7 +202,7 @@ Current files:
 - `src/lib/behaviors.ts` holds penalty, exercise, and once-daily healthy behavior events, plus edit/delete persistence.
 - `src/components/overview/MiniBlocks.tsx` renders 1-hour blocks with partial-fill support and consequence overlays.
 - `src/components/overview/WeeklyOverview.tsx` renders daily Work / Reward / Penalty columns with two-wide block groups.
-- `src/app/page.tsx` hosts the "Behavior tracking" dialog and mixes behavior events into reward accounting.
+- `src/app/page.tsx` hosts the shared-day-selector Behavior Tracking dialog and mixes behavior events into reward accounting.
 
 Task storage files:
 - `src/lib/tasks.ts` handles canonical task CRUD, task sorting, and revision fetching.
@@ -212,7 +212,7 @@ Task storage files:
 
 Current files:
 - `src/lib/cn.ts`
-- `src/lib/dates.ts` provides local-calendar day offsets and effective timestamps.
+- `src/lib/dates.ts` provides local-calendar day offsets, local-midday dates, and effective timestamps.
 - `src/components/ui/DayOffsetSelector.tsx` is the shared past-day arrow selector for effective-dated entries.
 
 ### Auth UI

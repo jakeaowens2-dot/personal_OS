@@ -11,7 +11,11 @@ import {
   updateBehaviorEvent,
 } from "@/lib/behaviors";
 import { WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK } from "@/lib/economy";
-import { getDayOffsetFromTimestamp, getTimestampForDayOffset } from "@/lib/dates";
+import {
+  getDayOffsetFromTimestamp,
+  getLocalMiddayTimestampForDayOffset,
+  getTimestampForDayOffset,
+} from "@/lib/dates";
 import type { ActivityItem } from "@/lib/history";
 import type { BehaviorType, LedgerEvent } from "@/lib/types";
 import {
@@ -83,6 +87,7 @@ export function EditableHistoryLedger({
   const [deleteTarget, setDeleteTarget] = useState<ActivityItem | null>(null);
   const [durationMinutes, setDurationMinutes] = useState("");
   const [eventDate, setEventDate] = useState("");
+  const [behaviorDayOffset, setBehaviorDayOffset] = useState(0);
   const [workDayOffset, setWorkDayOffset] = useState(0);
   const [note, setNote] = useState("");
   const [rewardName, setRewardName] = useState("");
@@ -140,7 +145,7 @@ export function EditableHistoryLedger({
   const requestBehaviorEdit = (item: Extract<ActivityItem, { kind: "behavior" }>["event"]) => {
     setBehaviorType(item.behavior_type);
     setDurationMinutes(String(item.duration_minutes ?? ""));
-    setEventDate(toDateInputValue(item.occurred_at));
+    setBehaviorDayOffset(getDayOffsetFromTimestamp(item.occurred_at));
     setNote(item.note ?? "");
     setRewardName("");
     setAttributions([]);
@@ -170,7 +175,7 @@ export function EditableHistoryLedger({
           durationMinutes: needsDuration ? parsedMinutes : null,
           eventId: editTarget.event.id,
           note,
-          occurredAt: timestampForDate(eventDate, editTarget.event.occurred_at),
+          occurredAt: getLocalMiddayTimestampForDayOffset(behaviorDayOffset),
           userId,
         });
         onUpdated({ kind: "behavior", event: updated });
@@ -252,6 +257,8 @@ export function EditableHistoryLedger({
   const editingReward = editTarget?.kind === "ledger" && editTarget.event.event_type === "reward_spent";
   const editingBehavior = editTarget?.kind === "behavior";
   const editingWork = editTarget?.kind === "ledger" && editTarget.event.event_type === "work_earned";
+  const editingBehaviorWithDuration = editingBehavior &&
+    (behaviorType === "screen_time" || behaviorType === "exercise");
 
   return (
     <>
@@ -308,7 +315,7 @@ export function EditableHistoryLedger({
             <Field label="Reward" onChange={(event) => setRewardName(event.target.value)} value={rewardName} />
           ) : null}
 
-          {!editingBehavior || behaviorType !== "indulgence" ? (
+          {!editingBehavior || editingBehaviorWithDuration ? (
             <Field
               inputMode="numeric"
               label={editingReward ? "Reward minutes" : "Minutes"}
@@ -319,12 +326,21 @@ export function EditableHistoryLedger({
             />
           ) : null}
 
-          {editingBehavior || editingReward ? (
+          {editingReward ? (
             <Field
               label="Day"
               onChange={(event) => setEventDate(event.target.value)}
               type="date"
               value={eventDate}
+            />
+          ) : null}
+
+          {editingBehavior ? (
+            <DayOffsetSelector
+              disabled={isSaving}
+              label="Day of behavior"
+              onChange={setBehaviorDayOffset}
+              value={behaviorDayOffset}
             />
           ) : null}
 

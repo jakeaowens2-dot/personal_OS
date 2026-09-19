@@ -9,6 +9,15 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Behavior tracking reliability (2026-09-19) — Shared day selector and visible saves
+
+Status: Complete
+
+All behavior categories now use the shared previous/next-day selector, including
+indulgent behavior. Saves are synchronously guarded against double submission and
+display failures inside the modal. The healthy-behavior production constraint and
+once-daily index were verified and activated before deployment.
+
 ## Completed work editing (2026-09-18) — Timer and manual blocks
 
 Status: Complete

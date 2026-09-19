@@ -15,7 +15,11 @@ import { Dialog } from "@/components/ui/Dialog";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { TaskPriorityLabel } from "@/components/ui/TaskPriorityLabel";
 import { dedupeLedgerEvents, getLedgerEventRecordedAt } from "@/lib/ledger";
-import { getDayOffsetFromTimestamp, getTimestampForDayOffset } from "@/lib/dates";
+import {
+  getDayOffsetFromTimestamp,
+  getLocalMiddayTimestampForDayOffset,
+  getTimestampForDayOffset,
+} from "@/lib/dates";
 import {
   computeScreenTimePenalty,
   fetchBehaviorEvents,
@@ -130,21 +134,17 @@ type RewardDialogMode =
 
 type BehaviorDialogState = {
   behaviorType: BehaviorType;
+  dayOffset: number;
   screenTimeMinutes: string;
-  screenTimeDate: string;
   exerciseMinutes: string;
-  exerciseDate: string;
-  healthyBehaviorDate: string;
   note: string;
 };
 
 const INITIAL_BEHAVIOR_DIALOG_STATE: BehaviorDialogState = {
   behaviorType: "indulgence",
+  dayOffset: 0,
   screenTimeMinutes: "",
-  screenTimeDate: "",
   exerciseMinutes: "",
-  exerciseDate: "",
-  healthyBehaviorDate: "",
   note: "",
 };
 
@@ -259,12 +259,6 @@ function formatRewardMinutes(totalMinutes: number) {
   const prefix = totalMinutes < 0 ? "-" : "";
 
   return `${prefix}${hours}:${minutes.toString().padStart(2, "0")}`;
-}
-
-function toDateInputValue(isoTimestamp: string) {
-  const date = new Date(isoTimestamp);
-  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
-  return offsetDate.toISOString().slice(0, 10);
 }
 
 function formatDurationLabel(hours: number, minutes: number) {
@@ -573,6 +567,7 @@ export default function HomePage() {
   const [isAttributionSaving, setIsAttributionSaving] = useState(false);
   const manualWorkSaveInFlightRef = useRef(false);
   const attributionSaveInFlightRef = useRef(false);
+  const behaviorSaveInFlightRef = useRef(false);
   const manualWorkSubmissionRef = useRef<ManualWorkSubmission | null>(null);
   const attributionIdsByTaskIdRef = useRef<Record<string, string>>({});
   const [isRewardDialogOpen, setIsRewardDialogOpen] = useState(false);
@@ -587,6 +582,8 @@ export default function HomePage() {
   const [isBehaviorDialogOpen, setIsBehaviorDialogOpen] = useState(false);
   const [behaviorDialogState, setBehaviorDialogState] = useState<BehaviorDialogState>(INITIAL_BEHAVIOR_DIALOG_STATE);
   const [behaviorDialogMode, setBehaviorDialogMode] = useState<BehaviorDialogMode>({ kind: "create" });
+  const [behaviorDialogError, setBehaviorDialogError] = useState<string | null>(null);
+  const [isBehaviorSaving, setIsBehaviorSaving] = useState(false);
   const [behaviorDeleteTarget, setBehaviorDeleteTarget] = useState<BehaviorEvent | null>(null);
   const [breakRequest, setBreakRequest] = useState<{ token: number; minutes: number } | null>(null);
   const [pendingSessionEnd, setPendingSessionEnd] = useState<PendingSessionEnd | null>(null);
@@ -1377,17 +1374,19 @@ export default function HomePage() {
   };
 
   const handleSaveBehaviorEvent = async () => {
-    if (!supabase || !workspaceUserId) {
+    if (!supabase || !workspaceUserId || behaviorSaveInFlightRef.current) {
       return;
     }
 
     let durationMinutes: number | null = null;
-    let occurredAt: string | undefined;
+    const occurredAt = getLocalMiddayTimestampForDayOffset(behaviorDialogState.dayOffset);
+    setBehaviorDialogError(null);
 
     if (behaviorDialogState.behaviorType === "screen_time") {
       const screenMinutes = Number.parseInt(behaviorDialogState.screenTimeMinutes, 10);
 
       if (!Number.isFinite(screenMinutes) || screenMinutes <= 0) {
+        setBehaviorDialogError("Enter your total screen time for the day in minutes.");
         setPersistenceState({
           kind: "error",
           message: "Enter your total screen time for the day in minutes.",
@@ -1396,14 +1395,11 @@ export default function HomePage() {
       }
 
       durationMinutes = screenMinutes;
-
-      if (behaviorDialogState.screenTimeDate) {
-        occurredAt = new Date(`${behaviorDialogState.screenTimeDate}T12:00:00`).toISOString();
-      }
     } else if (behaviorDialogState.behaviorType === "exercise") {
       const workoutMinutes = Number.parseInt(behaviorDialogState.exerciseMinutes, 10);
 
       if (!Number.isFinite(workoutMinutes) || workoutMinutes <= 0) {
+        setBehaviorDialogError("Enter your workout length in minutes.");
         setPersistenceState({
           kind: "error",
           message: "Enter your workout length in minutes.",
@@ -1412,16 +1408,10 @@ export default function HomePage() {
       }
 
       durationMinutes = workoutMinutes;
-
-      if (behaviorDialogState.exerciseDate) {
-        occurredAt = new Date(`${behaviorDialogState.exerciseDate}T12:00:00`).toISOString();
-      }
-    } else if (isHealthyBehaviorType(behaviorDialogState.behaviorType)) {
-      if (behaviorDialogState.healthyBehaviorDate) {
-        occurredAt = new Date(`${behaviorDialogState.healthyBehaviorDate}T12:00:00`).toISOString();
-      }
     }
 
+    behaviorSaveInFlightRef.current = true;
+    setIsBehaviorSaving(true);
     setPersistenceState({
       kind: "saving",
       message: "Saving behavior entry...",
@@ -1451,15 +1441,21 @@ export default function HomePage() {
       setIsBehaviorDialogOpen(false);
       setBehaviorDialogState(INITIAL_BEHAVIOR_DIALOG_STATE);
       setBehaviorDialogMode({ kind: "create" });
+      setBehaviorDialogError(null);
       setPersistenceState({
         kind: "saved",
         message: behaviorDialogMode.kind === "edit" ? "Behavior entry updated" : "Behavior entry saved",
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save the behavior entry.";
+      setBehaviorDialogError(message);
       setPersistenceState({
         kind: "error",
-        message: error instanceof Error ? error.message : "Could not save the behavior entry.",
+        message,
       });
+    } finally {
+      behaviorSaveInFlightRef.current = false;
+      setIsBehaviorSaving(false);
     }
   };
 
@@ -1467,16 +1463,13 @@ export default function HomePage() {
     setBehaviorDialogMode({ kind: "edit", event });
     setBehaviorDialogState({
       behaviorType: event.behavior_type,
+      dayOffset: getDayOffsetFromTimestamp(event.occurred_at),
       screenTimeMinutes:
         event.behavior_type === "screen_time" ? String(event.duration_minutes ?? "") : "",
-      screenTimeDate: event.behavior_type === "screen_time" ? toDateInputValue(event.occurred_at) : "",
       exerciseMinutes: event.behavior_type === "exercise" ? String(event.duration_minutes ?? "") : "",
-      exerciseDate: event.behavior_type === "exercise" ? toDateInputValue(event.occurred_at) : "",
-      healthyBehaviorDate: isHealthyBehaviorType(event.behavior_type)
-        ? toDateInputValue(event.occurred_at)
-        : "",
       note: event.note ?? "",
     });
+    setBehaviorDialogError(null);
     setIsBehaviorDialogOpen(true);
   };
 
@@ -2754,6 +2747,7 @@ export default function HomePage() {
           setIsBehaviorDialogOpen(false);
           setBehaviorDialogState(INITIAL_BEHAVIOR_DIALOG_STATE);
           setBehaviorDialogMode({ kind: "create" });
+          setBehaviorDialogError(null);
         }}
         open={isBehaviorDialogOpen}
         title={behaviorDialogMode.kind === "edit" ? "Edit behavior entry" : "Behavior tracking"}
@@ -2773,9 +2767,6 @@ export default function HomePage() {
                     setBehaviorDialogState((current) => ({
                       ...current,
                       behaviorType: tab.value === "healthy_behaviors" ? "waking_routine" : tab.value,
-                      healthyBehaviorDate: tab.value === "healthy_behaviors"
-                        ? current.healthyBehaviorDate || toDateInputValue(new Date().toISOString())
-                        : current.healthyBehaviorDate,
                     }))
                   }
                   variant={selected ? "primary" : "secondary"}
@@ -2785,6 +2776,15 @@ export default function HomePage() {
               );
             })}
           </div>
+
+          <DayOffsetSelector
+            disabled={isBehaviorSaving}
+            label="Day of behavior"
+            onChange={(dayOffset) =>
+              setBehaviorDialogState((current) => ({ ...current, dayOffset }))
+            }
+            value={behaviorDialogState.dayOffset}
+          />
 
           {behaviorDialogState.behaviorType === "indulgence" ? (
             <div className="rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
@@ -2798,14 +2798,6 @@ export default function HomePage() {
 
           {behaviorDialogState.behaviorType === "screen_time" ? (
             <div className="space-y-3">
-              <ActionField
-                label="Day"
-                onChange={(event) =>
-                  setBehaviorDialogState((current) => ({ ...current, screenTimeDate: event.target.value }))
-                }
-                type="date"
-                value={behaviorDialogState.screenTimeDate}
-              />
               <ActionField
                 label="Total screen time (minutes)"
                 inputMode="numeric"
@@ -2821,9 +2813,7 @@ export default function HomePage() {
                   Penalty:{" "}
                   {computeScreenTimePenalty(
                     Number.parseInt(behaviorDialogState.screenTimeMinutes, 10) || 0,
-                    behaviorDialogState.screenTimeDate
-                      ? new Date(`${behaviorDialogState.screenTimeDate}T12:00:00`).toISOString()
-                      : undefined,
+                    getLocalMiddayTimestampForDayOffset(behaviorDialogState.dayOffset),
                   )}{" "}
                   minutes
                 </p>
@@ -2833,14 +2823,6 @@ export default function HomePage() {
 
           {behaviorDialogState.behaviorType === "exercise" ? (
             <div className="space-y-3">
-              <ActionField
-                label="Day"
-                onChange={(event) =>
-                  setBehaviorDialogState((current) => ({ ...current, exerciseDate: event.target.value }))
-                }
-                type="date"
-                value={behaviorDialogState.exerciseDate}
-              />
               <ActionField
                 label="Workout length (minutes)"
                 inputMode="numeric"
@@ -2874,17 +2856,6 @@ export default function HomePage() {
                   );
                 })}
               </div>
-              <ActionField
-                label="Day"
-                onChange={(event) =>
-                  setBehaviorDialogState((current) => ({
-                    ...current,
-                    healthyBehaviorDate: event.target.value,
-                  }))
-                }
-                type="date"
-                value={behaviorDialogState.healthyBehaviorDate}
-              />
             </div>
           ) : null}
 
@@ -2897,8 +2868,21 @@ export default function HomePage() {
             value={behaviorDialogState.note}
           />
 
-          <Button className="w-full" onClick={handleSaveBehaviorEvent} variant="secondary">
-            {behaviorDialogMode.kind === "edit" ? "Save changes" : "Save behavior entry"}
+          {behaviorDialogError ? (
+            <p className="text-sm text-rose-700">{behaviorDialogError}</p>
+          ) : null}
+
+          <Button
+            className="w-full"
+            disabled={isBehaviorSaving}
+            onClick={handleSaveBehaviorEvent}
+            variant="secondary"
+          >
+            {isBehaviorSaving
+              ? "Saving..."
+              : behaviorDialogMode.kind === "edit"
+                ? "Save changes"
+                : "Save behavior entry"}
           </Button>
         </div>
       </Dialog>
