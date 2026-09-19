@@ -23,7 +23,7 @@ import {
 import {
   computeScreenTimePenalty,
   fetchBehaviorEvents,
-  getBehaviorExerciseMinutes,
+  getPositiveBehaviorRewardMinutes,
   getBehaviorTypeLabel,
   hardDeleteBehaviorEvent,
   INDULGENCE_PENALTY_MINUTES,
@@ -616,8 +616,8 @@ export default function HomePage() {
     [dedupedWorkBlocks],
   );
 
-  const exerciseMinutes = useMemo(
-    () => getBehaviorExerciseMinutes(behaviorEvents),
+  const positiveBehaviorRewardMinutes = useMemo(
+    () => getPositiveBehaviorRewardMinutes(behaviorEvents),
     [behaviorEvents],
   );
 
@@ -631,13 +631,16 @@ export default function HomePage() {
   }, [dedupedLedgerEvents, behaviorEvents]);
 
   const rewardDisplay = useMemo(() => {
-    const exerciseVisibleMinutes = Math.min(exerciseMinutes, settlement.positiveMinutes);
+    const positiveBehaviorVisibleMinutes = Math.min(
+      positiveBehaviorRewardMinutes,
+      settlement.positiveMinutes,
+    );
 
     return {
-      exerciseVisibleMinutes,
-      positiveWorkMinutes: settlement.positiveMinutes - exerciseVisibleMinutes,
+      exerciseVisibleMinutes: positiveBehaviorVisibleMinutes,
+      positiveWorkMinutes: settlement.positiveMinutes - positiveBehaviorVisibleMinutes,
     };
-  }, [exerciseMinutes, settlement.positiveMinutes]);
+  }, [positiveBehaviorRewardMinutes, settlement.positiveMinutes]);
 
   const isWeekendBonusActive = useMemo(
     () => isWeekendDate(new Date().toISOString()),

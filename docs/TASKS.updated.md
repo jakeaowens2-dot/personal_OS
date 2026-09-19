@@ -9,6 +9,14 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
+## Healthy behavior reward bonus (2026-09-19) — Fixed positive credit
+
+Status: Complete
+
+Waking routine and one gallon of water now each add 30 reward minutes. The bonus is
+derived from the durable behavior event, so existing healthy entries are credited
+without a data migration and edits/deletions continue to recalculate the balance.
+
 ## Behavior tracking reliability (2026-09-19) — Shared day selector and visible saves
 
 Status: Complete
@@ -34,7 +42,7 @@ Status: Complete
 Behavior Tracking now includes a Healthy behaviors tab for the waking routine
 (first alarm, water, walk) and one gallon of water. Each can be logged once per day,
 uses the exercise/periwinkle activity color, remains editable/deletable in history,
-and intentionally has no reward-balance effect.
+and now earns a fixed 30-minute reward-balance bonus.
 
 ## Work attribution dates (2026-09-16) — Effective-day selector
 

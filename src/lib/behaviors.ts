@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { usesEconomyPolicyV2 } from "@/lib/economy";
+import { HEALTHY_BEHAVIOR_REWARD_MINUTES, usesEconomyPolicyV2 } from "@/lib/economy";
 import type { BehaviorEvent, BehaviorType, HealthyBehaviorType } from "@/lib/types";
 
 export const INDULGENCE_PENALTY_MINUTES = 60;
@@ -180,7 +180,7 @@ export async function fetchBehaviorEvents(supabase: SupabaseClient, userId: stri
   return (data ?? []) as unknown as BehaviorEvent[];
 }
 
-// Net reward-minutes contributed by behavior events: exercise adds minutes, penalties subtract.
+// Net reward-minutes contributed by behavior events: positive behaviors add, penalties subtract.
 export function getBehaviorRewardDeltaMinutes(events: BehaviorEvent[]) {
   return events.reduce((total, event) => {
     if (event.behavior_type === "exercise") {
@@ -188,7 +188,7 @@ export function getBehaviorRewardDeltaMinutes(events: BehaviorEvent[]) {
     }
 
     if (isHealthyBehaviorType(event.behavior_type)) {
-      return total;
+      return total + HEALTHY_BEHAVIOR_REWARD_MINUTES;
     }
 
     return total - (event.penalty_minutes ?? 0);
@@ -205,8 +205,14 @@ export function getBehaviorPenaltyMinutes(events: BehaviorEvent[]) {
   }, 0);
 }
 
-export function getBehaviorExerciseMinutes(events: BehaviorEvent[]) {
+export function getPositiveBehaviorRewardMinutes(events: BehaviorEvent[]) {
   return events.reduce((total, event) => {
-    return event.behavior_type === "exercise" ? total + (event.duration_minutes ?? 0) : total;
+    if (event.behavior_type === "exercise") {
+      return total + (event.duration_minutes ?? 0);
+    }
+
+    return isHealthyBehaviorType(event.behavior_type)
+      ? total + HEALTHY_BEHAVIOR_REWARD_MINUTES
+      : total;
   }, 0);
 }

@@ -199,7 +199,7 @@ Current file:
 ### Behavior tracking
 
 Current files:
-- `src/lib/behaviors.ts` holds penalty, exercise, and once-daily healthy behavior events, plus edit/delete persistence.
+- `src/lib/behaviors.ts` holds penalty, exercise, and fixed-bonus once-daily healthy behavior events, plus edit/delete persistence.
 - `src/components/overview/MiniBlocks.tsx` renders 1-hour blocks with partial-fill support and consequence overlays.
 - `src/components/overview/WeeklyOverview.tsx` renders daily Work / Reward / Penalty columns with two-wide block groups.
 - `src/app/page.tsx` hosts the shared-day-selector Behavior Tracking dialog and mixes behavior events into reward accounting.

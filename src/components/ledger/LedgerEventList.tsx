@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/Badge";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { getBehaviorTypeLabel, isHealthyBehaviorType } from "@/lib/behaviors";
+import { HEALTHY_BEHAVIOR_REWARD_MINUTES } from "@/lib/economy";
 import type { ActivityItem } from "@/lib/history";
 import { exercisePalette, penaltyPalette, rewardPalette, timerPalette } from "@/lib/timerPalette";
 import type { BehaviorEvent, LedgerEvent } from "@/lib/types";
@@ -106,7 +107,7 @@ function getBehaviorDeltaLabel(event: BehaviorEvent) {
   }
 
   if (isHealthyBehaviorType(event.behavior_type)) {
-    return "Completed";
+    return `+${HEALTHY_BEHAVIOR_REWARD_MINUTES} min reward`;
   }
 
   return `-${Math.ceil(event.penalty_minutes ?? 0)} min reward`;

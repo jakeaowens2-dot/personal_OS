@@ -8,6 +8,7 @@ import type { BehaviorEvent, LedgerEvent, WorkBlock } from "@/lib/types";
 export const WORK_BLOCK_WORK_MINUTES = 50;
 export const WORK_BLOCK_REST_MINUTES = 10;
 export const REWARD_BLOCK_MINUTES = 60;
+export const HEALTHY_BEHAVIOR_REWARD_MINUTES = 30;
 export const ECONOMY_POLICY_V2_EFFECTIVE_AT = "2026-09-05T05:00:00.000Z";
 export const LEGACY_WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK = 20;
 export const LEGACY_WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK = 30;
@@ -176,8 +177,17 @@ export function behaviorEventsToSettlementEvents(events: BehaviorEvent[]): Settl
     if (event.behavior_type === "exercise") {
       result.push({ kind: "credit", minutes: event.duration_minutes ?? 0, at: event.occurred_at });
     } else if (
-      event.behavior_type !== "waking_routine" &&
-      event.behavior_type !== "gallon_water"
+      event.behavior_type === "waking_routine" ||
+      event.behavior_type === "gallon_water"
+    ) {
+      result.push({
+        kind: "credit",
+        minutes: HEALTHY_BEHAVIOR_REWARD_MINUTES,
+        at: event.occurred_at,
+      });
+    } else if (
+      event.behavior_type === "indulgence" ||
+      event.behavior_type === "screen_time"
     ) {
       result.push({ kind: "penalty", minutes: event.penalty_minutes ?? 0, at: event.occurred_at });
     }
@@ -262,7 +272,7 @@ export type WeeklyEconomyDay = {
   dayLabel: string;
   workMinutes: number;
   rewardWorkMinutes: number;
-  exerciseMinutes: number;
+  behaviorRewardMinutes: number;
   penaltyMinutes: number;
 };
 
@@ -306,11 +316,25 @@ export function buildWeeklyEconomyDays({
           total + rewardMinutesForWorkMinutes(getWorkDurationMinutes(event), event.created_at),
         0,
       ),
-      exerciseMinutes: dayBehaviors
-        .filter((event) => event.behavior_type === "exercise")
-        .reduce((total, event) => total + (event.duration_minutes ?? 0), 0),
+      behaviorRewardMinutes: dayBehaviors.reduce((total, event) => {
+        if (event.behavior_type === "exercise") {
+          return total + (event.duration_minutes ?? 0);
+        }
+
+        if (
+          event.behavior_type === "waking_routine" ||
+          event.behavior_type === "gallon_water"
+        ) {
+          return total + HEALTHY_BEHAVIOR_REWARD_MINUTES;
+        }
+
+        return total;
+      }, 0),
       penaltyMinutes: dayBehaviors
-        .filter((event) => event.behavior_type !== "exercise")
+        .filter(
+          (event) =>
+            event.behavior_type === "indulgence" || event.behavior_type === "screen_time",
+        )
         .reduce((total, event) => total + (event.penalty_minutes ?? 0), 0),
     };
   });

@@ -59,12 +59,12 @@ function DayBlocks({ children, minutes }: { children: React.ReactNode; minutes: 
 export function WeeklyOverview({ days }: WeeklyOverviewProps) {
   const totals = days.reduce(
     (result, day) => ({
-      exercise: result.exercise + day.exerciseMinutes,
+      behaviorReward: result.behaviorReward + day.behaviorRewardMinutes,
       penalty: result.penalty + day.penaltyMinutes,
       rewardWork: result.rewardWork + day.rewardWorkMinutes,
       work: result.work + day.workMinutes,
     }),
-    { exercise: 0, penalty: 0, rewardWork: 0, work: 0 },
+    { behaviorReward: 0, penalty: 0, rewardWork: 0, work: 0 },
   );
 
   return (
@@ -92,14 +92,14 @@ export function WeeklyOverview({ days }: WeeklyOverviewProps) {
           ))}
         </CategoryRow>
 
-        <CategoryRow label="Reward" totalMinutes={totals.rewardWork + totals.exercise} withRule>
+        <CategoryRow label="Reward" totalMinutes={totals.rewardWork + totals.behaviorReward} withRule>
           {days.map((day) => {
             const destroyedWorkMinutes = Math.min(day.penaltyMinutes, day.rewardWorkMinutes);
-            const destroyedExerciseMinutes = Math.min(
+            const destroyedBehaviorRewardMinutes = Math.min(
               Math.max(0, day.penaltyMinutes - destroyedWorkMinutes),
-              day.exerciseMinutes,
+              day.behaviorRewardMinutes,
             );
-            const rewardTotal = day.rewardWorkMinutes + day.exerciseMinutes;
+            const rewardTotal = day.rewardWorkMinutes + day.behaviorRewardMinutes;
 
             return (
               <DayBlocks key={day.date} minutes={rewardTotal}>
@@ -113,9 +113,9 @@ export function WeeklyOverview({ days }: WeeklyOverviewProps) {
                   />
                   <MiniBlocks
                     color={exercisePalette.progress}
-                    destroyedMinutes={destroyedExerciseMinutes}
+                    destroyedMinutes={destroyedBehaviorRewardMinutes}
                     layout="contents"
-                    minutes={day.exerciseMinutes}
+                    minutes={day.behaviorRewardMinutes}
                     minutesPerBlock={REWARD_BLOCK_MINUTES}
                   />
                 </div>
