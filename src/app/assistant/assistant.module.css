@@ -429,29 +429,58 @@
   margin: 1.5rem 0;
 }
 .proposal {
-  padding: 0.9rem 0;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.83rem;
+  margin-top: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 0.85rem;
+  overflow: hidden;
 }
-.proposal dl {
-  margin: 0.5rem 0;
+.proposalSummary {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 1rem;
+  cursor: pointer;
+  list-style: none;
 }
-.proposal dl > div {
-  display: grid;
-  grid-template-columns: 6rem 1fr;
-  gap: 0.75rem;
+.proposalSummary::-webkit-details-marker { display: none; }
+.proposalSummary:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
+.proposalChevron { font-size: 1.5rem; color: var(--muted); transition: transform 150ms; }
+.proposal[open] > .proposalSummary .proposalChevron { transform: rotate(90deg); }
+.proposalHeading { display: grid; gap: 0.3rem; flex: 1; min-width: 0; }
+.proposalHeading strong { font-size: 0.94rem; line-height: 1.45; overflow-wrap: anywhere; }
+.proposalOutcome { font-size: 0.75rem; color: var(--muted); }
+.proposalOutcome[data-outcome="applied"] { color: #27613e; }
+.priorityChip {
+  flex-shrink: 0;
+  padding: 0.35rem 0.65rem;
+  border-radius: 5px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: #e6e4df;
+  color: #494740;
 }
-.proposal dt {
-  color: var(--muted);
-  text-transform: capitalize;
-}
-.proposal dd {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.beforeValue {
-  color: var(--muted);
-  text-decoration: line-through;
+.priorityChip[data-priority="low"] { background: #d6ebdc; color: #205937; }
+.priorityChip[data-priority="medium"] { background: #f9d779; color: #644000; }
+.priorityChip[data-priority="high"] { background: #b74131; color: #fff; }
+.priorityChip[data-priority="critical"] { background: #7c2348; color: #fff; }
+.proposalBody { padding: 0 1rem 1rem 2.25rem; }
+.proposalDescription { font-size: 0.92rem; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.proposalDependencies { margin-top: 1rem; padding-top: 0.8rem; border-top: 1px solid var(--border); color: var(--muted); line-height: 1.6; }
+.proposalDependencies h3 { font-size: 0.75rem; font-weight: 600; margin-bottom: 0.3rem; }
+.proposalDependencies p { font-size: 0.78rem; }
+.proposalDependencies ul { padding-left: 1rem; list-style: disc; }
+.proposalMeta { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin-top: 1rem; color: var(--muted); font-size: 0.75rem; }
+.proposalRationale { margin-top: 0.7rem; font-size: 0.75rem; color: var(--muted); }
+.proposalRationale summary { cursor: pointer; }
+.proposalRationale p { margin-top: 0.4rem; line-height: 1.6; }
+@media (max-width: 500px) {
+  .proposalSummary { gap: 0.5rem; padding: 0.8rem; }
+  .proposalBody { padding: 0 0.8rem 1rem; }
+  .priorityChip { padding: 0.3rem 0.45rem; font-size: 0.65rem; }
 }
 .proposalActions {
   display: flex;

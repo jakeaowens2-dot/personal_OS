@@ -66,7 +66,11 @@ export type TaskProposal = {
   task_id: string | null;
   expected_updated_at: string | null;
   patch_json: TaskPatch;
-  before_json: (TaskPatch & { title: string }) | null;
+  before_json: (TaskPatch & {
+    title: string;
+    description?: string | null;
+    agent_payload_json?: { dependencies?: string[] };
+  }) | null;
   reason: string;
   source_ids: string[];
   status: "pending" | "applied" | "rejected";

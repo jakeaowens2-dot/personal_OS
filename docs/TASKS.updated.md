@@ -1,5 +1,11 @@
 # Tasks
 
+## Task review cards and live pilot audit — 2026-09-20
+
+Completed locally: individual task cards, prominent semantic priority chips, one title, description-first body, secondary prerequisites and inspectable rationale/previous values. Accepted/rejected cards collapse automatically and can reopen; accepted status reads “Task change accepted.” No mutation contract changed. Typecheck/lint, 19 assistant tests and signed-in desktop/mobile inspection passed.
+
+Audited the real planning turn: two sourced memory revisions, five tool receipts, three approved canonical tasks. Found unconfirmed workday narrowing, prose-only dependencies and one ordinary task standing in for recurring outreach. Next: clarify cadence; extend approved description/prerequisite writes; prove real later-turn recall and closeout/opening. See `ASSISTANT_PILOT_REVIEW_20260920.md`.
+
 ## Shared workspace surfaces — 2026-09-20
 
 Implemented locally: shared date/account/status/settings ribbon and route tabs for Work tracking (`/`), Personal Assistant (`/assistant`), and Task Management (`/settings/tasks`). Removed duplicate page branding/account headers; retained surface-specific controls. Compact tabs wrap labels on narrow screens. Home warns before a tab switch discards an unfinished timer; timer persistence across routes remains a separate limitation. Verified signed-in navigation across all three surfaces, desktop/mobile layouts, and the timer warning; typecheck/lint and 18 assistant regression tests passed. Not deployed: the assistant remains local-only.
@@ -27,7 +33,7 @@ user acceptance, and hosted deployment is not included. Recovery requires the ex
 origin's `/settings/account` URL in Supabase's redirect allowlist; email limits still
 apply to recovery, not ordinary password sign-in.
 
-Status: Code implemented and real Supabase migration applied; signed-in local acceptance pending.
+Status: Code and migration active; real signed-in memory writes and approved task creation verified 2026-09-20. Real closeout/opening and later-turn recall remain acceptance work.
 
 Selected bounded window: use the existing chat for daily planning, automatically
 maintain the three application-owned memory homes, and review task creation,
@@ -48,9 +54,10 @@ of the broader planning/proposal engine and research integrations.
   `20260912000000_assistant_daily_planning.sql` atomically. Verified nine ownership
   policies, RLS, denied anonymous writes and private helper permissions. No CLI
   migration-history baseline exists; see the direct-SQL receipt in `ASSISTANT_LOCAL.md`.
-- Remaining acceptance gate: sign in at localhost. The observed test-account login
-  landed on the hosted Vercel site; localhost remains signed out. Local server was
-  restarted and the anonymous assistant endpoint correctly returns 401.
+- Signed-in acceptance 2026-09-20: local password authentication now works. A real
+  planning turn saved daily/priorities entries and proposed three tasks, all later
+  accepted into the task vault. The prior closeout was stopped, so complete
+  closeout/opening and later-turn real-data recall still need verification.
 - Still deferred: daily-focus mutation, broad proposal batches, full morning brief,
   scheduler, research/SMS, and guaranteed erasure from revisions/native history.
 

@@ -7,6 +7,7 @@ import type {
   MemoryEntry,
   TaskProposal,
 } from "@/lib/assistant/state";
+import { proposalPresentation } from "@/lib/assistant/proposal-presentation";
 import styles from "@/app/assistant/assistant.module.css";
 
 function Sources({
@@ -240,62 +241,59 @@ export function ProposalList({
   busy: boolean;
 }) {
   if (!proposals.length) return null;
+  const title = proposals.some((p) => p.status === "pending") ? "Task changes to review" : "Task changes";
   return (
-    <section className={styles.proposals} aria-label="Task changes to review">
-      <h2>Task changes to review</h2>
+    <section className={styles.proposals} aria-label={title}>
+      <h2>{title}</h2>
       {proposals.map((p) => (
-        <article key={p.id} className={styles.proposal}>
-          <strong>
-            {p.before_json?.title || p.patch_json.title || "Task update"}
-          </strong>
-          <dl>
-            {Object.entries(p.patch_json).map(([key, value]) => (
-              <div key={key}>
-                <dt>
-                  {key === "human_summary"
-                    ? "Progress note"
-                    : key.replaceAll("_", " ")}
-                </dt>
-                <dd>
-                  {p.before_json &&
-                    p.before_json[key as keyof typeof p.before_json] && (
-                      <>
-                        <span className={styles.beforeValue}>
-                          {p.before_json[key as keyof typeof p.before_json]}
-                        </span>
-                        <span aria-label="to"> → </span>
-                      </>
-                    )}
-                  {value}
-                </dd>
-              </div>
-            ))}
-          </dl>
-          <p className={styles.muted}>{p.reason}</p>
-          {p.status === "pending" ? (
-            <div className={styles.proposalActions}>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onResolve(p.id, true)}
-              >
-                Apply {p.task_id ? "change" : "new task"}
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => onResolve(p.id, false)}
-              >
-                Reject
-              </button>
-            </div>
-          ) : (
-            <p className={styles.muted}>
-              {p.status === "applied" ? "Applied to task vault" : "Rejected"}
-            </p>
-          )}
-        </article>
+        <ProposalCard key={`${p.id}:${p.status}`} proposal={p} onResolve={onResolve} busy={busy} />
       ))}
     </section>
+  );
+}
+
+function ProposalCard({ proposal: p, onResolve, busy }: {
+  proposal: TaskProposal;
+  onResolve: (id: string, apply: boolean) => void;
+  busy: boolean;
+}) {
+  const view = proposalPresentation(p);
+  const pending = p.status === "pending";
+  return (
+    <details className={styles.proposal} open={pending ? true : undefined}>
+      <summary className={styles.proposalSummary}>
+        <span className={styles.proposalChevron} aria-hidden="true">›</span>
+        <span className={styles.proposalHeading}>
+          <strong>{view.title}</strong>
+          <span className={styles.proposalOutcome} data-outcome={p.status}>
+            {pending ? (p.before_json ? "Task change to review" : "New task to review") : p.status === "applied" ? "Task change accepted" : "Task change rejected"}
+          </span>
+        </span>
+        <span className={styles.priorityChip} data-priority={view.priority ?? "unknown"}>
+          {view.priority ?? "Unspecified"}<span className="sr-only"> priority</span>
+        </span>
+      </summary>
+      <div className={styles.proposalBody}>
+        {view.previousTitle && <p className={styles.muted}>Previously: {view.previousTitle}</p>}
+        <p className={styles.proposalDescription}>{view.description || "No description recorded."}</p>
+        <section className={styles.proposalDependencies} aria-label="Task dependencies">
+          <h3>Before this</h3>
+          {view.dependencies.length ? <ul>{view.dependencies.map((dependency, index) => <li key={index}>{dependency}</li>)}</ul> : <p>No prerequisites recorded.</p>}
+        </section>
+        <div className={styles.proposalMeta}>
+          <span>Status: {view.previousStatus && `${view.previousStatus.replaceAll("_", " ")} → `}{view.status.replaceAll("_", " ")}</span>
+          {view.previousPriority && <span>Priority: {view.previousPriority} → {view.priority}</span>}
+        </div>
+        <details className={styles.proposalRationale}>
+          <summary>Why this change{view.previousDescription ? " · previous note" : ""}</summary>
+          <p>{p.reason}</p>
+          {view.previousDescription && <p>Previous note: {view.previousDescription}</p>}
+        </details>
+        {pending && <div className={styles.proposalActions}>
+          <button type="button" disabled={busy} onClick={() => onResolve(p.id, true)}>Accept {p.before_json ? "change" : "task"}</button>
+          <button type="button" disabled={busy} onClick={() => onResolve(p.id, false)}>Reject</button>
+        </div>}
+      </div>
+    </details>
   );
 }

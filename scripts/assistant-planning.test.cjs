@@ -302,3 +302,26 @@ test("Hermes exit zero is not proof of success; errors and cancellation stay fai
     }
   });
 });
+
+test("proposal cards present the proposed snapshot without inventing dependency links", () => {
+  const { proposalPresentation } = require("../src/lib/assistant/proposal-presentation.ts");
+  const base = { before_json: null, patch_json: { title: "Create case study", human_summary: "After the report is delivered, adapt it for marketing." } };
+  const created = proposalPresentation(base);
+  assert.equal(created.title, "Create case study");
+  assert.equal(created.priority, "medium");
+  assert.deepEqual(created.dependencies, []);
+  const changed = proposalPresentation({
+    before_json: { title: "Old title", priority: "low", status: "open", human_summary: "Previous progress", agent_payload_json: { dependencies: ["Deliver report", ""] } },
+    patch_json: { title: "New title", priority: "high", status: "completed", human_summary: "Delivered" },
+  });
+  assert.equal(changed.title, "New title");
+  assert.equal(changed.previousTitle, "Old title");
+  assert.equal(changed.priority, "high");
+  assert.equal(changed.previousPriority, "low");
+  assert.equal(changed.description, "Delivered");
+  assert.equal(changed.previousDescription, "Previous progress");
+  assert.deepEqual(changed.dependencies, ["Deliver report"]);
+  assert.equal(changed.status, "completed");
+  const cleared = proposalPresentation({ before_json: { title: "Task", human_summary: "Outdated" }, patch_json: { human_summary: "" } });
+  assert.equal(cleared.description, "");
+});

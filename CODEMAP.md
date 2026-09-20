@@ -176,7 +176,9 @@ Current files:
 - `src/app/api/assistant/route.ts` authenticates local state/turn/review/proposal requests; SQL leases fence concurrent turns.
 - `src/lib/assistant/hermes.ts` and `scripts/hermes-planning-worker.py` run the dedicated native Hermes loop with fixed application tools and profile-scoped history.
 - `src/lib/assistant/state.ts`, `store.ts`, `tools.ts`, and `planning-prompt.ts` own canonical types/validation, current context, tool contracts, and planning instructions.
-- `src/components/assistant/WorkingState.tsx` renders memory, sources/revisions, all carry-forward groups, and task proposal review.
+- `src/components/assistant/WorkingState.tsx` renders memory, carry-forward reviews, and collapsible task cards with priority chips and approval status.
+- `src/lib/assistant/proposal-presentation.ts` derives proposal display values and preserves actual recorded prerequisites.
+- `docs/ASSISTANT_PILOT_REVIEW_20260920.md` audits the first real planning turn, saved memory/tasks, and remaining continuity/dependency gaps.
 - `supabase/migrations/20260912000000_assistant_daily_planning.sql` owns assistant storage, RLS, leases, revision-safe memory writes and atomic task approval.
 - `scripts/assistant-planning.test.cjs` and `assistant-db.test.{cjs,sql}` verify boundaries and disposable-database acceptance; `assistant-hermes.smoke.cjs` is the opt-in subscription-backed runtime check.
 - `codex.ts`, `prompt.ts`, `context.ts`, and their original tests retain the earlier chat-only experiment as reference; they are not the active endpoint. `contracts.ts` still supplies local request limits/origin checks.
