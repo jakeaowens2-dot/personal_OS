@@ -7,6 +7,14 @@ Implementation is present and the assistant migration was applied to the existin
 Supabase project on 2026-09-12. Signed-in local browser acceptance remains pending.
 This is not a hosted release.
 
+Authentication-only hosted release (2026-09-20): production main commit `35352e0`
+adds password sign-in and `/settings/account` on top of current production `8108b41`.
+Typecheck, lint and production build passed. Vercel deployment
+`BiEDv73B4DehbSo5Zauod3beTdsr` reported success, and the existing signed-in browser
+at `https://personal-os-2j29.vercel.app/settings/account` showed the password-change
+form for the expected account. Password entry/save remains with the user. This
+release does not deploy the local Hermes assistant or unrelated workspace edits.
+
 Activation receipt (2026-09-12): connected using the private
 `SUPABASE_URL_SESSION_POOLER` field in `.env.local`; verified its project reference
 matches the app URL and the existing task columns/audit triggers. Applied only
