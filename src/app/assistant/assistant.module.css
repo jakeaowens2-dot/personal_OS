@@ -117,6 +117,11 @@
   background: var(--accent);
   color: var(--surface);
 }
+/* The optimistic message sits outside the persisted conversation's flex layout. */
+.conversation + .userMessage {
+  margin-inline-start: auto;
+  margin-block-start: 2rem;
+}
 .assistantMessage {
   padding: 0.25rem 0;
 }
