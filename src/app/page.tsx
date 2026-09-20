@@ -8,10 +8,9 @@ import { MiniBlocks } from "@/components/overview/MiniBlocks";
 import { OverviewModule } from "@/components/overview/OverviewModule";
 import { WeeklyOverview } from "@/components/overview/WeeklyOverview";
 import { PomodoroTimer, type SessionEndInfo, type TimerStatus } from "@/components/timer/PomodoroTimer";
-import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Dialog } from "@/components/ui/Dialog";
-import { PopoverMenu } from "@/components/ui/PopoverMenu";
+import { WorkspaceHeader } from "@/components/workspace/WorkspaceHeader";
 import { TaskPriorityLabel } from "@/components/ui/TaskPriorityLabel";
 import { dedupeLedgerEvents } from "@/lib/ledger";
 import {
@@ -162,14 +161,6 @@ function formatTimestamp(isoTimestamp: string) {
     month: "short",
     day: "numeric",
   }).format(new Date(isoTimestamp));
-}
-
-function getTodayLabel() {
-  return new Intl.DateTimeFormat("en-US", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-  }).format(new Date());
 }
 
 function getWeekStart(date: Date) {
@@ -2086,67 +2077,10 @@ export default function HomePage() {
 
   return (
     <main className="min-h-screen transition-colors duration-500" style={{ background: pageToneClass }}>
-      <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-8 px-6 py-10 sm:py-14">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-2">
-            <p className="text-sm text-slate-500">{getTodayLabel()}</p>
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
-              Productivity OS
-            </h1>
-            <p className="max-w-2xl text-sm leading-6 text-slate-600 sm:text-base">
-              One quiet workspace for focus, recovery, and a visible work loop.
-            </p>
-          </div>
-          <div className="flex flex-col items-start gap-3 sm:items-end">
-            {workspaceUserEmail ? (
-              <p className="text-sm text-slate-500">
-                Logged in as: <span className="font-medium text-slate-900">{workspaceUserEmail}</span>
-              </p>
-            ) : null}
-            <Badge className="normal-case tracking-normal" tone="neutral">
-              {persistenceState.message}
-            </Badge>
-            <PopoverMenu
-              buttonClassName="text-xs uppercase tracking-[0.18em] text-slate-400 hover:text-slate-600"
-              label="Settings"
-              menuClassName="min-w-40 rounded-2xl bg-[var(--surface)]/95 shadow-[0_16px_32px_rgba(15,23,42,0.12)]"
-            >
-              <Link
-                className="block rounded-xl px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
-                href="/settings/tasks"
-              >
-                Task vault
-              </Link>
-              <Link
-                className="block rounded-xl px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
-                href="/projects/safety-evidence"
-              >
-                Project fieldbook
-              </Link>
-              <Link className="block rounded-xl px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950" href="/settings/account">
-                Account password
-              </Link>
-              {workspaceUserId ? (
-                <button
-                  className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
-                  onClick={() => setIsResetDialogOpen(true)}
-                  type="button"
-                >
-                  Reset workspace
-                </button>
-              ) : null}
-              {workspaceUserId ? (
-                <button
-                  className="block w-full rounded-xl px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/80 hover:text-slate-950"
-                  onClick={() => void handleSignOut()}
-                  type="button"
-                >
-                  Sign out
-                </button>
-              ) : null}
-            </PopoverMenu>
-          </div>
-        </header>
+      <WorkspaceHeader email={workspaceUserEmail} status={persistenceState.message} onSignOut={() => void handleSignOut()} onReset={() => setIsResetDialogOpen(true)} unfinishedTimer={!["idle", "complete"].includes(timerVisualState.status)} />
+      <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-8">
+        <h1 className="sr-only">Work tracking</h1>
+
 
         {persistenceState.kind === "error" ? (
           <p className="text-sm text-rose-700">{persistenceState.message}</p>

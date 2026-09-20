@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { WorkspaceHeader } from "@/components/workspace/WorkspaceHeader";
 import {
   useCallback,
   useEffect,
@@ -356,11 +357,9 @@ export default function AssistantPage() {
 
   return (
     <main className={styles.page}>
+      <WorkspaceHeader />
       <header className={styles.header}>
-        <Link href="/" className={styles.homeLink}>
-          ← Personal OS
-        </Link>
-        <h1 className={styles.title}>Your assistant</h1>
+        <h1 className="sr-only">Personal Assistant</h1>
         <details className={styles.details}>
           <summary className={styles.detailsToggle}>
             <span
