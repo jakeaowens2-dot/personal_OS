@@ -1,5 +1,10 @@
 # Tasks
 
+## Password authentication release — 2026-09-20
+
+Implemented password-first sign-in, optional magic links, and Home Settings → Account password. Existing signed-in users can set/change passwords without another login email. Signed-out recovery still requires email and an allowed redirect URL. Uses existing Supabase Auth ownership; no schema or assistant runtime changes. Typecheck, lint, and production build passed in an isolated checkout based on current production. Production deployment pending.
+
+
 This file defines the phased rollout.
 
 Agents should complete tasks in order unless instructed otherwise.

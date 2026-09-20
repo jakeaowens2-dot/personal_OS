@@ -303,3 +303,7 @@ When moving or deleting a file:
 
 When a task only changes internal logic inside an existing mapped file:
 - No update is required unless the file’s purpose changed.
+
+### Account access
+- `src/components/auth/EmailAuthPanel.tsx`: password-first sign-in with optional magic links.
+- `src/app/settings/account/page.tsx`: signed-in password setup/change and signed-out recovery request.
