@@ -295,7 +295,6 @@ function ProposalCard({ proposal: p, onResolve, busy }: {
           {view.previousStatus && <span>Change status: {view.previousStatus.replaceAll("_", " ")} → {view.status.replaceAll("_", " ")}</span>}
           {view.previousPriority && <span>Priority: {view.previousPriority} → {view.priority}</span>}
         </div>}
-        {pending && <p className={styles.muted}>{view.status === "completed" ? "Accepting also completes this task in today’s focus, if present." : "Accepting also adds this task to today’s focus."}</p>}
         {pending && <div className={styles.proposalActions}>
           <button type="button" disabled={busy} onClick={() => onResolve(p.id, true)}>Accept {p.before_json ? "change" : "task"}</button>
           <button type="button" disabled={busy} onClick={() => onResolve(p.id, false)}>Reject</button>

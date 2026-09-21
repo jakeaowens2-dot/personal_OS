@@ -6,7 +6,7 @@ Completed locally and migration activated: cards show a single executive Status 
 
 ## Accepted assistant tasks → Today’s Focus — 2026-09-20
 
-Implemented and activated: acceptance now atomically appends unfinished agreed tasks to today’s active focus (America/Chicago), without duplicates or overriding existing order/notes/deferrals. Accepted completion settles an existing active/planned focus item. Rejection does not add focus. The review card discloses the effect. The user’s three previously accepted tasks were added to today with the report first. Seven-day work/outreach cadence is explicitly confirmed; daily recurring instances remain separate future work. Typecheck, lint, 20 assistant tests and the full isolated SQL suite including focus acceptance checks passed.
+Implemented and activated: acceptance now atomically appends unfinished agreed tasks to today’s active focus (America/Chicago), without duplicates or overriding existing order/notes/deferrals. Accepted completion settles an existing active/planned focus item. Rejection does not add focus. The redundant focus-effect notice was removed from review cards at user request (2026-09-20); acceptance behavior is unchanged. The user’s three previously accepted tasks were added to today with the report first. Seven-day work/outreach cadence is explicitly confirmed; daily recurring instances remain separate future work. Typecheck, lint, 20 assistant tests and the full isolated SQL suite including focus acceptance checks passed.
 
 ## Reviewed descriptions and task prerequisites — 2026-09-20
 
