@@ -1,5 +1,9 @@
 # Tasks
 
+## Accepted assistant tasks → Today’s Focus — 2026-09-20
+
+Implemented and activated: acceptance now atomically appends unfinished agreed tasks to today’s active focus (America/Chicago), without duplicates or overriding existing order/notes/deferrals. Accepted completion settles an existing active/planned focus item. Rejection does not add focus. The review card discloses the effect. The user’s three previously accepted tasks were added to today with the report first. Seven-day work/outreach cadence is explicitly confirmed; daily recurring instances remain separate future work. Typecheck, lint, 20 assistant tests and the full isolated SQL suite including focus acceptance checks passed.
+
 ## Reviewed descriptions and task prerequisites — 2026-09-20
 
 Completed and activated: canonical task descriptions plus explicit task-ID prerequisites through the existing review/approval flow; separate progress notes; owned references, cycle checks and prerequisite snapshot conflicts; readable prerequisite names. Cards use a transparent fill and omit rationale/routine status. Typecheck/lint, 20 tests, full SQL suite via isolated PostgreSQL/PGlite and live Hermes saved-plan recall/correction/progress/fresh-session replay passed. The replay could not write real account data. Supabase migration applied with permissions verified and existing record counts unchanged. See `ASSISTANT_PREREQUISITES_20260920.md`.

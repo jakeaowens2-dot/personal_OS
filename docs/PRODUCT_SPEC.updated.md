@@ -457,6 +457,7 @@ Rules:
   focus `dropped`.
 - Deferring leaves the task `open` and sets focus `deferred`.
 - Adding to today sets focus `active`.
+- Accepting an assistant task proposal adds an unfinished task to the acceptance day’s active focus (America/Chicago), in the same transaction. Existing entries retain their order, notes and focus status. Repeated acceptance and rejection cannot duplicate/add entries. Accepted completion marks an existing active/planned entry done. This does not imply automatic recurrence on future dates.
 - Focus status explains what happened to the plan; task status tracks the task's own
   lifecycle. They are intentionally separate vocabularies.
 - Carry-forward metadata should help future agents detect repeated deferrals and

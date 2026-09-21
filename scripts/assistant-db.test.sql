@@ -6,8 +6,11 @@ create table auth.users(id uuid primary key);
 create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
 grant usage on schema auth to authenticated,anon;
 \ir ../supabase/migrations/20260528001500_add_tasks_and_revisions.sql
+\ir ../supabase/migrations/20260528011500_add_daily_focus.sql
 \ir ../supabase/migrations/20260912000000_assistant_daily_planning.sql
 \ir ../supabase/migrations/20260921000000_assistant_task_prerequisites.sql
+\ir ../supabase/migrations/20260921010000_assistant_accepted_focus.sql
+grant select,update on daily_focus_lists,daily_focus_items to authenticated;
 -- Match Supabase's existing table grants, protected by the existing task RLS.
 grant select,insert,update on public.tasks to authenticated;
 grant select on public.task_revisions to authenticated;
@@ -54,6 +57,7 @@ end $$;
 update tasks set human_summary='Changed in the task vault' where title='Offline demo';
 select test_expect_error($q$select assistant_resolve_proposal('44444444-4444-4444-8444-444444444444',true)$q$,'changed after the proposal');
 \ir assistant-prerequisites.test.sql
+\ir assistant-focus.test.sql
 -- More than three items and an uncertain item survive a published handoff.
 do $$ declare src uuid; i integer; entry jsonb; begin
  select id into src from assistant_messages where turn_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';

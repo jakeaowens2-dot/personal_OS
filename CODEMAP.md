@@ -179,6 +179,7 @@ Current files:
 - `src/components/assistant/WorkingState.tsx` renders memory, carry-forward reviews, and collapsible task cards with priority chips and approval status.
 - `src/lib/assistant/proposal-presentation.ts` separates descriptions/progress and resolves reviewed prerequisite snapshots for cards.
 - `supabase/migrations/20260921000000_assistant_task_prerequisites.sql` adds reviewed descriptions, task-ID prerequisites, graph validation and approval snapshots.
+- `supabase/migrations/20260921010000_assistant_accepted_focus.sql` atomically propagates accepted tasks into today’s focus; `scripts/assistant-focus.test.sql` checks acceptance, retries, deferrals and completion.
 - `scripts/assistant-prerequisites.test.sql` covers link/description approval invariants; `assistant-db-pglite.cjs` is an optional isolated Docker-free SQL runner.
 - `scripts/assistant-plan-replay.cjs` evaluates real Hermes recall/corrections/proposals against an isolated saved-plan copy.
 - `docs/ASSISTANT_PREREQUISITES_20260920.md` records the contract, verification and live migration activation.

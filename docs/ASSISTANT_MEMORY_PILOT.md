@@ -23,8 +23,10 @@ Task scope is intentionally narrow: create, title, description, status, priority
 progress summary and explicit prerequisite task IDs. The 2026-09-20 extension
 preserves progress separately from descriptions and checks owned references, cycles
 and prerequisite snapshots at approval; see `ASSISTANT_PREREQUISITES_20260920.md`. The assistant can propose; only the user-facing Apply transaction changes
-the canonical task and triggers its existing revision log. Daily focus and ledger
-writes remain outside this toolset. This does not implement the entire later
+the canonical task and triggers its existing revision log. As of 2026-09-20,
+acceptance also adds unfinished agreed tasks to today’s active focus, preserving
+existing choices; accepted completion settles existing active/planned focus entries.
+The agent cannot independently edit focus or the ledger. This does not implement the entire later
 `TaskMutationProposalBatch` contract.
 
 The native tool adapter bypasses the known stdio MCP defect without editing the

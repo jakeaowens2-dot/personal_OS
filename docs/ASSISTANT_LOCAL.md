@@ -106,7 +106,8 @@ requirements and can be exposed through another adapter later.
 Only app context/history/task reads, the three memory upserts, task proposals,
 review publication, maintenance completion, and profile-scoped native history
 search are exposed. There is no task-approval tool, arbitrary local-file access,
-shell, web, messaging, ledger mutation, or daily-focus mutation in this slice.
+shell, web, messaging or ledger mutation. Task acceptance now also propagates the
+agreed task into today’s focus atomically; there is no independent agent focus tool.
 Built-in competing user/general memory and background review are disabled only in
 the dedicated profile. Useful native session history and compaction are retained.
 
@@ -145,7 +146,7 @@ correction acceptance remain to be exercised. No production deployment or Git pu
 is part of this slice. The branch is `codex/assistant-daily-planning`; unrelated
 existing economy/history work has been preserved.
 
-Deliberate limits: no automatic daily-focus edits, full proposal-batch engine,
+Deliberate limits: no independent agent focus edits or recurring daily scheduling, full proposal-batch engine,
 nightly jobs, research, integrations, embedding store, or complete erasure workflow.
 Memory corrections preserve revisions; “forget” must not claim source/history
 purging. Current date views fail visibly at 1,000 messages rather than silently
@@ -157,3 +158,23 @@ Build note: Next.js currently emits a non-fatal file-tracing warning for the loc
 Python launcher. The build succeeds; inspected trace entries contain project
 source/docs, not credential files. Trim the deployment trace before any hosted
 assistant release. This slice is local-only.
+
+## Acceptance-to-focus activation — 2026-09-20
+
+Applied `20260921010000_assistant_accepted_focus.sql` through the configured app
+session pooler after running the full isolated SQL suite, including
+`assistant-focus.test.sql`. Acceptance atomically adds unfinished canonical tasks
+to the current Central-date focus as `active`; repeated acceptance does not add
+rows, existing focus choices/order/notes remain intact, and accepted completion
+settles an existing active/planned item. Rejected proposals add nothing. The helper
+and trigger functions are private; authenticated approval remains the entry point.
+
+At the user's explicit request, populated today's focus with the three previously
+accepted tasks: NIA report first, then case study and daily outreach. Verified all
+three on the signed-in Work tracking page. This is not a recurring scheduler.
+
+The user confirmed seven-day work/planning and outreach including weekends. Used
+the normal handoff-correction chat flow to record a sourced preferences entry,
+correct daily notes, republish the September 20 handoff preserving newer progress,
+and review/apply the outreach wording correction. Other pending proposals from the
+user's separate progress exchange were not accepted or altered by this operation.
