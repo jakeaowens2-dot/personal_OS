@@ -350,6 +350,7 @@ Rules:
 - Canonical `tasks` are the source of truth for all task state.
 - Daily focus items must reference canonical tasks rather than duplicating task content.
 - Task changes must create durable task revision rows.
+- Assistant review cards show a concise current-state Status and expandable dated History from these revisions. Closed cards are historical snapshots. At acceptance/rejection, persist the latest saved assistant response ID on the proposal; subsequent messages and retries cannot move that decision. Pending proposals remain in the review queue across exchanges. Daily chat history retrieves decisions by their response attachment, not merely by originating turn or recent global proposal count.
 - Agent-readable context belongs in compact, versioned `agent_payload_json`, not in unbounded transcript fields.
 - Optional `parent_task_id` supports lightweight `subtask -> task` relationships before project objects exist.
 

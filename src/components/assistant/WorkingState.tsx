@@ -7,7 +7,7 @@ import type {
   MemoryEntry,
   TaskProposal,
 } from "@/lib/assistant/state";
-import { proposalPresentation } from "@/lib/assistant/proposal-presentation";
+import { proposalPresentation, proposalStatusSummary } from "@/lib/assistant/proposal-presentation";
 import styles from "@/app/assistant/assistant.module.css";
 
 function Sources({
@@ -274,17 +274,24 @@ function ProposalCard({ proposal: p, onResolve, busy }: {
         </span>
       </summary>
       <div className={styles.proposalBody}>
-        {view.previousTitle && <p className={styles.muted}>Previously: {view.previousTitle}</p>}
-        <p className={styles.proposalDescription}>{view.description || "No description recorded."}</p>
-        {view.previousDescription && <p className={styles.muted}>Previous description: {view.previousDescription}</p>}
-        {view.progress && <p className={styles.proposalDescription}>Progress: {view.progress}</p>}
-        {view.previousProgress && <p className={styles.muted}>Previous progress: {view.previousProgress}</p>}
-        <section className={styles.proposalDependencies} aria-label="Task dependencies">
+        <section className={styles.proposalStatus} aria-label="Task status summary">
+          <h3>Status</h3>
+          <p className={styles.proposalDescription}>{proposalStatusSummary(p)}</p>
+          {p.patch_json.description !== undefined && p.patch_json.description !== proposalStatusSummary(p) && pending && <p className={styles.muted}>Description: {p.patch_json.description || "Clear description"}</p>}
+        </section>
+        <details className={styles.proposalHistory}>
+          <summary>History</summary>
+          {p.task_history?.length ? <ul>{p.task_history.map((entry) => <li key={entry.id}>
+            <time dateTime={entry.at}>{new Date(entry.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time> — {entry.text}
+          </li>)}</ul> : <p>No earlier changes recorded.</p>}
+          {p.status === "rejected" && <p>This proposed change was rejected.</p>}
+        </details>
+        {(view.dependencies.length > 0 || view.dependencyNotes.length > 0 || view.prerequisitesChanged) && <section className={styles.proposalDependencies} aria-label="Task dependencies">
           <h3>Before this</h3>
           {view.dependencies.length ? <ul>{view.dependencies.map((dependency, index) => <li key={index}>{dependency}</li>)}</ul> : <p>{view.prerequisitesChanged ? "No prerequisites — replaces the previous list." : "No prerequisites recorded."}</p>}
           {view.dependencyNotes.length > 0 && <p>Notes: {view.dependencyNotes.join("; ")}</p>}
-        </section>
-        {(view.previousStatus || view.previousPriority) && <div className={styles.proposalMeta}>
+        </section>}
+        {pending && (view.previousStatus || view.previousPriority) && <div className={styles.proposalMeta}>
           {view.previousStatus && <span>Change status: {view.previousStatus.replaceAll("_", " ")} → {view.status.replaceAll("_", " ")}</span>}
           {view.previousPriority && <span>Priority: {view.previousPriority} → {view.priority}</span>}
         </div>}

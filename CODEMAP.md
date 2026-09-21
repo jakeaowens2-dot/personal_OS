@@ -177,7 +177,8 @@ Current files:
 - `src/lib/assistant/hermes.ts` and `scripts/hermes-planning-worker.py` run the dedicated native Hermes loop with fixed application tools and profile-scoped history.
 - `src/lib/assistant/state.ts`, `store.ts`, `tools.ts`, and `planning-prompt.ts` own canonical types/validation, current context, tool contracts, and planning instructions.
 - `src/components/assistant/WorkingState.tsx` renders memory, carry-forward reviews, and collapsible task cards with priority chips and approval status.
-- `src/lib/assistant/proposal-presentation.ts` separates descriptions/progress and resolves reviewed prerequisite snapshots for cards.
+- `src/lib/assistant/proposal-presentation.ts` builds concise Status and revision History text, plus prerequisite labels.
+- `supabase/migrations/20260921020000_assistant_chat_decisions.sql` permanently anchors resolved cards to saved responses; `scripts/assistant-chat-decisions.test.sql` verifies owner-scoped placement and retry stability.
 - `supabase/migrations/20260921000000_assistant_task_prerequisites.sql` adds reviewed descriptions, task-ID prerequisites, graph validation and approval snapshots.
 - `supabase/migrations/20260921010000_assistant_accepted_focus.sql` atomically propagates accepted tasks into today’s focus; `scripts/assistant-focus.test.sql` checks acceptance, retries, deferrals and completion.
 - `scripts/assistant-prerequisites.test.sql` covers link/description approval invariants; `assistant-db-pglite.cjs` is an optional isolated Docker-free SQL runner.

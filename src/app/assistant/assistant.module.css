@@ -536,3 +536,10 @@
     width: calc(100% - 2rem);
   }
 }
+
+.proposalStatus h3 { font-size: 0.75rem; font-weight: 600; margin-bottom: 0.4rem; color: var(--muted); }
+.proposalHistory { margin-top: 1rem; color: var(--muted); font-size: 0.8rem; }
+.proposalHistory summary { cursor: pointer; font-weight: 600; }
+.proposalHistory ul { list-style: disc; padding-left: 1.2rem; margin-top: 0.6rem; }
+.proposalHistory li { margin: 0.5rem 0; line-height: 1.6; }
+.proposalHistory p { margin-top: 0.6rem; }

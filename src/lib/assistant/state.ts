@@ -78,6 +78,9 @@ export type TaskProposal = {
   source_ids: string[];
   status: "pending" | "applied" | "rejected";
   created_at: string;
+  resolved_at?: string | null;
+  resolved_message_id?: string | null;
+  task_history?: { id: string; at: string; text: string }[];
 };
 export type DailyReview = {
   id: string;

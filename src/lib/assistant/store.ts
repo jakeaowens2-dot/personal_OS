@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { taskRevisionSummary } from "./proposal-presentation";
 import { buildPlanningContextPacket } from "../planning";
 import {
   ASSISTANT_TIME_ZONE,
@@ -17,6 +18,7 @@ export async function loadAssistantState(
   userId: string,
   date = localDate(),
   extraDate?: string,
+  includeTaskHistory = true,
 ): Promise<AssistantState> {
   const today = localDate();
   const previous = await client
@@ -55,12 +57,6 @@ export async function loadAssistantState(
       .or(`kind.neq.daily,document_key.in.(${relevantDates.join(",")})`)
       .order("document_key", { ascending: false }),
     client
-      .from("assistant_task_proposals")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(201),
-    client
       .from("assistant_turns")
       .select(
         "id,input_json,status,local_date,memory_status,error,created_at,updated_at",
@@ -96,7 +92,6 @@ export async function loadAssistantState(
   const [
     messages,
     documents,
-    recentProposals,
     turns,
     receipts,
     reviews,
@@ -115,10 +110,29 @@ export async function loadAssistantState(
     throw new Error(
       "Review pending proposals before the queue exceeds 1,000; no pending item was silently omitted.",
     );
-  const proposals = [
-    ...(pending.data ?? []),
-    ...recentProposals.filter((p: TaskProposal) => p.status !== "pending"),
-  ];
+  const messageIds = (messages as StoredMessage[]).filter((m) => m.role === "assistant").map((m) => m.id);
+  const resolved = messageIds.length ? await client.from("assistant_task_proposals")
+    .select("*").eq("user_id", userId).in("resolved_message_id", messageIds)
+    .neq("status", "pending").order("resolved_at").order("id").limit(1001) : { data: [], error: null };
+  if (resolved.error) throw new Error(resolved.error.message);
+  if ((resolved.data?.length ?? 0) > 1000) throw new Error("This date exceeds 1,000 task decisions; history was not silently truncated.");
+  const proposals = [...(pending.data ?? []), ...(resolved.data ?? [])] as TaskProposal[];
+  const taskIds = [...new Set(proposals.map((p) => p.task_id).filter((id): id is string => Boolean(id)))];
+  // Fetch in pages so a busy task's history cannot silently consume another's.
+  const revisions: { id: string; task_id: string; created_at: string; before_json: Record<string, unknown> | null; after_json: Record<string, unknown> }[] = [];
+  for (let offset = 0; includeTaskHistory && taskIds.length; offset += 1000) {
+    const page = await client.from("task_revisions").select("id,task_id,created_at,before_json,after_json")
+      .eq("user_id", userId).in("task_id", taskIds).order("created_at").order("id").range(offset, offset + 999);
+    if (page.error) throw new Error(page.error.message);
+    revisions.push(...(page.data ?? []));
+    if ((page.data?.length ?? 0) < 1000) break;
+    if (offset >= 9000) throw new Error("Task history needs pagination beyond 10,000 revisions; no history was silently omitted.");
+  }
+  for (const proposal of proposals) {
+    const cutoff = proposal.status === "pending" ? proposal.created_at : proposal.resolved_at ?? proposal.created_at;
+    proposal.task_history = revisions.filter((r) => r.task_id === proposal.task_id && r.created_at <= cutoff)
+      .map((r) => ({ id: r.id, at: r.created_at, text: taskRevisionSummary(r.before_json, r.after_json) }));
+  }
   const dates = days as string[];
   const warnings: string[] = [];
   if (reviews.length >= 1000)
@@ -128,10 +142,6 @@ export async function loadAssistantState(
   if (messages.length >= 1000)
     throw new Error(
       "This date reaches the 1,000-message view limit. Use source-history search; the daily view is not silently truncated.",
-    );
-  if (recentProposals.length > 200)
-    warnings.push(
-      "Showing recent resolved proposals plus every pending proposal. Older task changes remain in the task vault.",
     );
   return {
     userId,
@@ -161,8 +171,9 @@ export async function buildAssistantContext(
     userId,
     localDate(),
     reviewDate,
+    false,
   );
-  const [planning, tasks, messages, previousReview] = await Promise.all([
+  const [planning, tasks, messages, previousReview, proposalOutcomes] = await Promise.all([
     buildPlanningContextPacket(client, userId),
     client
       .from("tasks")
@@ -186,7 +197,10 @@ export async function buildAssistantContext(
       .order("local_date", { ascending: false })
       .order("revision", { ascending: false })
       .limit(1),
+    client.from("assistant_task_proposals").select("*").eq("user_id", userId)
+      .neq("status", "pending").order("resolved_at", { ascending: false }).limit(10),
   ]);
+  if (proposalOutcomes.error) throw new Error(proposalOutcomes.error.message);
   if (previousReview.error) throw new Error(previousReview.error.message);
   if (tasks.error || messages.error)
     throw new Error(tasks.error?.message ?? messages.error?.message);
@@ -223,10 +237,8 @@ export async function buildAssistantContext(
     tasks: tasks.data?.slice(0, 60),
     tasksHaveMore: (tasks.data?.length ?? 0) > 60,
     planning,
-    pendingProposals: state.proposals.filter((p) => p.status === "pending"),
-    recentProposalOutcomes: state.proposals
-      .filter((p) => p.status !== "pending")
-      .slice(0, 10),
+    pendingProposals: state.proposals.filter((p) => p.status === "pending").map((p) => ({ ...p, task_history: undefined })),
+    recentProposalOutcomes: proposalOutcomes.data ?? [],
     recentMessages: messages.data?.slice(0, 30).reverse(),
     recentMessagesHaveMore: (messages.data?.length ?? 0) > 30,
     warnings: state.warnings,

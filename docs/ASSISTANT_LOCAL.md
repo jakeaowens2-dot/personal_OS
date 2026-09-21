@@ -159,6 +159,29 @@ Python launcher. The build succeeds; inspected trace entries contain project
 source/docs, not credential files. Trim the deployment trace before any hosted
 assistant release. This slice is local-only.
 
+## Durable chat decisions — 2026-09-20
+
+Applied `20260921020000_assistant_chat_decisions.sql` to the configured Supabase
+project. Five historical closed proposals were attached to the latest owned
+assistant response at or before their resolution timestamp. Verified no missing,
+foreign, non-assistant or future anchors; task and memory revision counts unchanged.
+New accept/reject transactions persist this response ID, and closed decisions
+cannot be moved. If no response exists yet, resolution fails atomically and asks
+the user to wait. No new user messages or task decisions were manufactured for QA.
+
+The chat renders resolved cards beneath their stored response and only pending
+cards in the trailing review queue. Date navigation loads that day's attached
+cards without the previous global 200-proposal cutoff. Task History is paged from
+canonical revisions and bounded at each proposal/decision timestamp; later task
+edits do not rewrite old cards. Entries are concise factual summaries, not generated
+narratives. Limits fail visibly instead of silently dropping history.
+
+Verified the report's Status/History, accepted cards under their saved responses,
+and the pending CRM proposal in the review queue in the signed-in browser. The
+full isolated SQL suite covers owned latest-response selection, pending/unresolved
+placement, accepted/rejected decisions, immutable historical anchors and retries.
+Typecheck/lint and 21 assistant tests passed.
+
 ## Acceptance-to-focus activation — 2026-09-20
 
 Applied `20260921010000_assistant_accepted_focus.sql` through the configured app

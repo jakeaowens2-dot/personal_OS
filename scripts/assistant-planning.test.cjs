@@ -339,3 +339,13 @@ test("descriptions, progress and prerequisite replacements retain distinct seman
   assert.equal(view.previousProgress, "Not started");
   assert.deepEqual(view.dependencies, ["Deliver report · completed"]);
 });
+
+test("status is one current narrative and task history summarizes real revisions", () => {
+  const { proposalStatusSummary, taskRevisionSummary } = require("../src/lib/assistant/proposal-presentation.ts");
+  const proposal = { status: "applied", before_json: { human_summary: "Not started" }, patch_json: { human_summary: "Pipeline work is underway; report not delivered." } };
+  assert.equal(proposalStatusSummary(proposal), "Pipeline work is underway; report not delivered.");
+  assert.equal(proposalStatusSummary({ ...proposal, status: "rejected" }), "Not started");
+  assert.equal(taskRevisionSummary(null, { title: "Report" }), "Created: Report.");
+  assert.match(taskRevisionSummary({ status: "open", human_summary: "Not started" }, { status: "in_progress", human_summary: "Pipeline underway" }), /Marked in progress · Progress: Pipeline underway/);
+  assert.ok(taskRevisionSummary({ human_summary: "Old" }, { human_summary: "a".repeat(700) }).length < 200);
+});

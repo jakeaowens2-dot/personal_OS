@@ -46,8 +46,10 @@ cadence drift and dependency/recurrence limits, and `ASSISTANT_LOCAL.md` for ope
 
 Task review UI (2026-09-20): each proposed change has its own card, a semantic
 priority chip, a single title, primary descriptive text and secondary prerequisites.
-Prior changed values remain inspectable; rationale stays in the audit record rather
-than the card. The routine status line is omitted. Pending cards begin expanded;
+Cards show a concise Status summary and expandable dated History derived from
+canonical task revisions; rationale remains in the audit record. Closed cards retain
+the task snapshot at decision time and attach permanently to the latest saved
+assistant response at acceptance/rejection. Pending cards stay in the review queue. The routine status line is omitted. Pending cards begin expanded;
 accepted/rejected cards collapse and can reopen. Only actual recorded dependencies
 are shown. Reviewed writes now support canonical descriptions and prerequisite
 task IDs, with progress summaries remaining separate. No recurring task engine

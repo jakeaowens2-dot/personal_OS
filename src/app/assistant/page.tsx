@@ -596,6 +596,11 @@ export default function AssistantPage() {
                       .join(" · ")}
                   </p>
                 )}
+                {message.role === "assistant" && state && <ProposalList
+                  proposals={state.proposals.filter((p) => p.status !== "pending" && p.resolved_message_id === message.id)}
+                  onResolve={(id, apply) => void resolve(id, apply)}
+                  busy={applying}
+                />}
               </article>
             ))}
           </div>
@@ -613,9 +618,7 @@ export default function AssistantPage() {
           {state && (
             <ProposalList
               proposals={state.proposals.filter(
-                (p) =>
-                  p.status === "pending" ||
-                  messages.some((m) => m.turn_id === p.turn_id),
+                (p) => p.status === "pending",
               )}
               onResolve={(id, apply) => void resolve(id, apply)}
               busy={applying}

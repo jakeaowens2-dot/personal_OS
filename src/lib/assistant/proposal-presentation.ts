@@ -29,3 +29,29 @@ export function proposalPresentation(proposal: TaskProposal) {
     prerequisitesChanged: patch.prerequisite_task_ids !== undefined,
   };
 }
+
+
+/** Short factual history entries from the canonical task revision log. */
+export function taskRevisionSummary(before: Record<string, unknown> | null, after: Record<string, unknown>) {
+  const short = (value: unknown) => {
+    const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
+    return text.length > 180 ? `${text.slice(0, 177)}…` : text;
+  };
+  if (!before) return `Created${after.title ? `: ${short(after.title)}` : ""}.`;
+  const changes: string[] = [];
+  if (before.title !== after.title) changes.push(`Renamed: ${short(after.title)}`);
+  if (before.status !== after.status) changes.push(`Marked ${String(after.status).replaceAll("_", " ")}`);
+  if (before.priority !== after.priority) changes.push(`Priority changed to ${after.priority}`);
+  if (before.human_summary !== after.human_summary) changes.push(after.human_summary ? `Progress: ${short(after.human_summary)}` : "Progress note cleared");
+  if (before.description !== after.description) changes.push(after.description ? `Description: ${short(after.description)}` : "Description cleared");
+  const prior = before.agent_payload_json as { prerequisite_task_ids?: string[] } | null;
+  const next = after.agent_payload_json as { prerequisite_task_ids?: string[] } | null;
+  if (JSON.stringify(prior?.prerequisite_task_ids ?? []) !== JSON.stringify(next?.prerequisite_task_ids ?? [])) changes.push("Prerequisites updated");
+  return changes.join(" · ") || "Task details updated.";
+}
+
+export function proposalStatusSummary(proposal: TaskProposal) {
+  const before = proposal.before_json;
+  const patch = proposal.status === "rejected" ? {} : proposal.patch_json;
+  return patch.human_summary ?? before?.human_summary ?? patch.description ?? before?.description ?? "No status summary recorded yet.";
+}

@@ -1,5 +1,9 @@
 # Tasks
 
+## Task Status/History and durable chat decisions — 2026-09-20
+
+Completed locally and migration activated: cards show a single executive Status summary and expandable dated History from canonical task revisions. Removed inline previous-progress clutter and empty prerequisite sections. Pending cards remain in the review queue; acceptance/rejection permanently attaches a card to the latest saved assistant reply, including across reloads/date navigation. Backfilled five existing decisions using their resolution timestamps without changing task content. Daily history loads its attached decisions instead of the latest 200 proposals globally. Typecheck/lint, 21 tests, full isolated SQL suite and signed-in browser inspection passed.
+
 ## Accepted assistant tasks → Today’s Focus — 2026-09-20
 
 Implemented and activated: acceptance now atomically appends unfinished agreed tasks to today’s active focus (America/Chicago), without duplicates or overriding existing order/notes/deferrals. Accepted completion settles an existing active/planned focus item. Rejection does not add focus. The review card discloses the effect. The user’s three previously accepted tasks were added to today with the report first. Seven-day work/outreach cadence is explicitly confirmed; daily recurring instances remain separate future work. Typecheck, lint, 20 assistant tests and the full isolated SQL suite including focus acceptance checks passed.

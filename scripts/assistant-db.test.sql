@@ -10,11 +10,16 @@ grant usage on schema auth to authenticated,anon;
 \ir ../supabase/migrations/20260912000000_assistant_daily_planning.sql
 \ir ../supabase/migrations/20260921000000_assistant_task_prerequisites.sql
 \ir ../supabase/migrations/20260921010000_assistant_accepted_focus.sql
+\ir ../supabase/migrations/20260921020000_assistant_chat_decisions.sql
 grant select,update on daily_focus_lists,daily_focus_items to authenticated;
 -- Match Supabase's existing table grants, protected by the existing task RLS.
 grant select,insert,update on public.tasks to authenticated;
 grant select on public.task_revisions to authenticated;
 insert into auth.users values('11111111-1111-4111-8111-111111111111'),('22222222-2222-4222-8222-222222222222');
+-- Prior complete response for all normal approval tests.
+insert into assistant_turns(id,user_id,input_json,local_date,status) values('10101010-1010-4010-8010-101010101010','11111111-1111-4111-8111-111111111111','{}',current_date-1,'completed');
+insert into assistant_messages(id,user_id,turn_id,role,text,local_date,created_at) values('20202020-2020-4020-8020-202020202020','11111111-1111-4111-8111-111111111111','10101010-1010-4010-8010-101010101010','assistant','Prior completed response',current_date-1,now()-interval '1 day');
+
 create function public.test_expect_error(statement text,expected text) returns void language plpgsql as $$
 declare caught boolean:=false; begin
  begin execute statement; exception when others then
@@ -58,6 +63,7 @@ update tasks set human_summary='Changed in the task vault' where title='Offline 
 select test_expect_error($q$select assistant_resolve_proposal('44444444-4444-4444-8444-444444444444',true)$q$,'changed after the proposal');
 \ir assistant-prerequisites.test.sql
 \ir assistant-focus.test.sql
+\ir assistant-chat-decisions.test.sql
 -- More than three items and an uncertain item survive a published handoff.
 do $$ declare src uuid; i integer; entry jsonb; begin
  select id into src from assistant_messages where turn_id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -90,7 +96,8 @@ select test_expect_error($q$select assistant_save_memory('aaaaaaaa-aaaa-4aaa-8aa
 select test_expect_error($q$insert into assistant_memory_documents(user_id,kind,document_key) values(auth.uid(),'preferences','core')$q$,'permission denied');
 select set_config('request.jwt.claim.sub','22222222-2222-4222-8222-222222222222',false);
 do $$ begin
- if (select count(*) from assistant_messages)>0 or (select count(*) from assistant_memory_documents)>0 then raise exception 'Cross-user data leak'; end if;
+ if exists(select 1 from assistant_messages where user_id<>auth.uid()) or (select count(*) from assistant_memory_documents)>0 then raise exception 'Cross-user data leak'; end if;
+ if (select count(*) from assistant_messages)<>1 then raise exception 'Owned history unexpectedly hidden'; end if;
 end $$;
 select test_expect_error($q$select assistant_resolve_proposal('44444444-4444-4444-8444-444444444444',true)$q$,'unavailable');
 select test_expect_error($q$select assistant_begin_turn('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','{"kind":"message","text":"My priority is the offline demo. Please mark it in progress."}','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')$q$,'different input');
