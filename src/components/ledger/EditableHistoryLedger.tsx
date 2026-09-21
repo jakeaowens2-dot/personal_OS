@@ -8,6 +8,8 @@ import { DayOffsetSelector } from "@/components/ui/DayOffsetSelector";
 import { Dialog } from "@/components/ui/Dialog";
 import {
   hardDeleteBehaviorEvent,
+  isHealthyBehaviorSuccess,
+  isHealthyBehaviorType,
   updateBehaviorEvent,
 } from "@/lib/behaviors";
 import { WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK } from "@/lib/economy";
@@ -92,6 +94,7 @@ export function EditableHistoryLedger({
   const [note, setNote] = useState("");
   const [rewardName, setRewardName] = useState("");
   const [behaviorType, setBehaviorType] = useState<BehaviorType>("indulgence");
+  const [healthyBehaviorSucceeded, setHealthyBehaviorSucceeded] = useState(true);
   const [attributions, setAttributions] = useState<AttributionSelection[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -144,6 +147,7 @@ export function EditableHistoryLedger({
 
   const requestBehaviorEdit = (item: Extract<ActivityItem, { kind: "behavior" }>["event"]) => {
     setBehaviorType(item.behavior_type);
+    setHealthyBehaviorSucceeded(isHealthyBehaviorSuccess(item));
     setDurationMinutes(String(item.duration_minutes ?? ""));
     setBehaviorDayOffset(getDayOffsetFromTimestamp(item.occurred_at));
     setNote(item.note ?? "");
@@ -174,6 +178,9 @@ export function EditableHistoryLedger({
           behaviorType,
           durationMinutes: needsDuration ? parsedMinutes : null,
           eventId: editTarget.event.id,
+          healthyBehaviorSucceeded: isHealthyBehaviorType(behaviorType)
+            ? healthyBehaviorSucceeded
+            : null,
           note,
           occurredAt: getLocalMiddayTimestampForDayOffset(behaviorDayOffset),
           userId,
@@ -259,6 +266,7 @@ export function EditableHistoryLedger({
   const editingWork = editTarget?.kind === "ledger" && editTarget.event.event_type === "work_earned";
   const editingBehaviorWithDuration = editingBehavior &&
     (behaviorType === "screen_time" || behaviorType === "exercise");
+  const editingHealthyBehavior = editingBehavior && isHealthyBehaviorType(behaviorType);
 
   return (
     <>
@@ -313,6 +321,20 @@ export function EditableHistoryLedger({
 
           {editingReward ? (
             <Field label="Reward" onChange={(event) => setRewardName(event.target.value)} value={rewardName} />
+          ) : null}
+
+          {editingHealthyBehavior ? (
+            <label className="space-y-2">
+              <span className="text-sm text-slate-600">Outcome</span>
+              <select
+                className="h-11 w-full rounded-[0.8rem] border border-slate-300/80 bg-white/80 px-4 text-sm text-slate-900 outline-none"
+                onChange={(event) => setHealthyBehaviorSucceeded(event.target.value === "yes")}
+                value={healthyBehaviorSucceeded ? "yes" : "no"}
+              >
+                <option value="yes">Yes · +30 reward minutes</option>
+                <option value="no">No · −30 reward minutes</option>
+              </select>
+            </label>
           ) : null}
 
           {!editingBehavior || editingBehaviorWithDuration ? (

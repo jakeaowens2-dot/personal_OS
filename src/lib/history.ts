@@ -28,6 +28,7 @@ const BEHAVIOR_COLUMNS = [
   "occurred_at",
   "duration_minutes",
   "penalty_minutes",
+  "healthy_behavior_succeeded",
   "note",
   "created_at",
 ].join(", ");

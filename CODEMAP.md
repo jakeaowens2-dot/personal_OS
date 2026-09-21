@@ -20,6 +20,8 @@ src/
       tasks/
         page.tsx
   components/
+    behaviors/
+      HealthyBehaviorCheckin.tsx
     auth/
       EmailAuthPanel.tsx
     ledger/
@@ -87,6 +89,7 @@ supabase/
     20260823000001_add_behavior_events.sql
     20260905000000_update_screen_time_penalty_economy.sql
     20260917000000_add_healthy_behaviors.sql
+    20260921000000_add_healthy_behavior_outcomes.sql
 ```
 
 ## Planned Structure
@@ -199,7 +202,8 @@ Current file:
 ### Behavior tracking
 
 Current files:
-- `src/lib/behaviors.ts` holds penalty, exercise, and fixed-bonus once-daily healthy behavior events, plus edit/delete persistence.
+- `src/lib/behaviors.ts` holds penalty, exercise, and once-daily healthy Yes/No outcomes, plus edit/delete persistence.
+- `src/components/behaviors/HealthyBehaviorCheckin.tsx` is the shared neutral-first animated Yes/No surface used by the midnight prompt and voluntary Tracking dialog.
 - `src/components/overview/MiniBlocks.tsx` renders 1-hour blocks with partial-fill support and consequence overlays.
 - `src/components/overview/WeeklyOverview.tsx` renders daily Work / Reward / Penalty columns with two-wide block groups.
 - `src/app/page.tsx` hosts the shared-day-selector Behavior Tracking dialog and mixes behavior events into reward accounting.

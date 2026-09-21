@@ -14,13 +14,23 @@ When a task is completed:
 - Add a short note with changed files and verification.
 - Do not skip ahead to later phases.
 
-## Healthy behavior reward bonus (2026-09-19) — Fixed positive credit
+## Daily healthy-behavior check-in (2026-09-21)
+
+Status: Complete
+
+Water and healthy morning habits now require an explicit Yes/No result each day.
+Missing answers for the preceding day open at midnight or page load and reopen after
+the next completed work session if dismissed. The same neutral-first controls remain
+available in Behavior Tracking for early entry. Yes earns 30 reward minutes; No
+creates a 30-minute penalty. Existing healthy entries retain their prior positive value.
+
+## Healthy behavior reward bonus (2026-09-19) — Fixed positive credit (superseded)
 
 Status: Complete
 
 Waking routine and one gallon of water now each add 30 reward minutes. The bonus is
 derived from the durable behavior event, so existing healthy entries are credited
-without a data migration and edits/deletions continue to recalculate the balance.
+without repricing. The 2026-09-21 daily check-in keeps +30 for Yes and adds −30 for No.
 
 ## Behavior tracking reliability (2026-09-19) — Shared day selector and visible saves
 

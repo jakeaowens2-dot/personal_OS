@@ -3,6 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 import { EmailAuthPanel, type EmailAuthPanelState } from "@/components/auth/EmailAuthPanel";
+import {
+  HealthyBehaviorCheckin,
+  type HealthyBehaviorOutcomes,
+} from "@/components/behaviors/HealthyBehaviorCheckin";
 import { LedgerEventList } from "@/components/ledger/LedgerEventList";
 import { MiniBlocks } from "@/components/overview/MiniBlocks";
 import { OverviewModule } from "@/components/overview/OverviewModule";
@@ -17,6 +21,7 @@ import { TaskPriorityLabel } from "@/components/ui/TaskPriorityLabel";
 import { dedupeLedgerEvents, getLedgerEventRecordedAt } from "@/lib/ledger";
 import {
   getDayOffsetFromTimestamp,
+  getDateForDayOffset,
   getLocalMiddayTimestampForDayOffset,
   getTimestampForDayOffset,
 } from "@/lib/dates";
@@ -28,6 +33,7 @@ import {
   hardDeleteBehaviorEvent,
   INDULGENCE_PENALTY_MINUTES,
   isHealthyBehaviorType,
+  isHealthyBehaviorSuccess,
   persistBehaviorEvent,
   updateBehaviorEvent,
 } from "@/lib/behaviors";
@@ -82,6 +88,7 @@ import { archiveTask, completeDailyFocusItem, completeTask, dropDailyFocusItem, 
 import type {
   BehaviorEvent,
   BehaviorType,
+  HealthyBehaviorType,
   DailyFocusItemWithTask,
   LedgerEvent,
   Task,
@@ -138,6 +145,12 @@ type BehaviorDialogState = {
   screenTimeMinutes: string;
   exerciseMinutes: string;
   note: string;
+  healthyOutcomes: HealthyBehaviorOutcomes;
+};
+
+const EMPTY_HEALTHY_OUTCOMES: HealthyBehaviorOutcomes = {
+  gallon_water: null,
+  waking_routine: null,
 };
 
 const INITIAL_BEHAVIOR_DIALOG_STATE: BehaviorDialogState = {
@@ -146,6 +159,7 @@ const INITIAL_BEHAVIOR_DIALOG_STATE: BehaviorDialogState = {
   screenTimeMinutes: "",
   exerciseMinutes: "",
   note: "",
+  healthyOutcomes: EMPTY_HEALTHY_OUTCOMES,
 };
 
 type BehaviorTab = "indulgence" | "screen_time" | "exercise" | "healthy_behaviors";
@@ -196,6 +210,24 @@ function getTodayLabel() {
     month: "long",
     day: "numeric",
   }).format(new Date());
+}
+
+function getHealthyOutcomesForDay(events: BehaviorEvent[], dayOffset: number): HealthyBehaviorOutcomes {
+  const outcomes = { ...EMPTY_HEALTHY_OUTCOMES };
+
+  for (const event of events) {
+    if (isHealthyBehaviorType(event.behavior_type) && getDayOffsetFromTimestamp(event.occurred_at) === dayOffset) {
+      outcomes[event.behavior_type] = isHealthyBehaviorSuccess(event);
+    }
+  }
+
+  return outcomes;
+}
+
+function formatCheckinDate(dayOffset: number) {
+  return new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" }).format(
+    getDateForDayOffset(dayOffset),
+  );
 }
 
 function getWeekStart(date: Date) {
@@ -579,11 +611,17 @@ export default function HomePage() {
   const [ledgerDeleteDialogState, setLedgerDeleteDialogState] = useState<LedgerEvent | null>(null);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [behaviorEvents, setBehaviorEvents] = useState<BehaviorEvent[]>([]);
+  const [hasLoadedBehaviorEvents, setHasLoadedBehaviorEvents] = useState(false);
   const [isBehaviorDialogOpen, setIsBehaviorDialogOpen] = useState(false);
   const [behaviorDialogState, setBehaviorDialogState] = useState<BehaviorDialogState>(INITIAL_BEHAVIOR_DIALOG_STATE);
   const [behaviorDialogMode, setBehaviorDialogMode] = useState<BehaviorDialogMode>({ kind: "create" });
   const [behaviorDialogError, setBehaviorDialogError] = useState<string | null>(null);
   const [isBehaviorSaving, setIsBehaviorSaving] = useState(false);
+  const [isHealthyCheckinOpen, setIsHealthyCheckinOpen] = useState(false);
+  const [healthyCheckinOutcomes, setHealthyCheckinOutcomes] = useState<HealthyBehaviorOutcomes>(EMPTY_HEALTHY_OUTCOMES);
+  const [healthyCheckinError, setHealthyCheckinError] = useState<string | null>(null);
+  const [isHealthyCheckinSaving, setIsHealthyCheckinSaving] = useState(false);
+  const [localDayKey, setLocalDayKey] = useState(() => new Date().toDateString());
   const [behaviorDeleteTarget, setBehaviorDeleteTarget] = useState<BehaviorEvent | null>(null);
   const [breakRequest, setBreakRequest] = useState<{ token: number; minutes: number } | null>(null);
   const [pendingSessionEnd, setPendingSessionEnd] = useState<PendingSessionEnd | null>(null);
@@ -597,6 +635,8 @@ export default function HomePage() {
     title: string;
   }>({ area: "", description: "", dueAt: "", priority: "medium", title: "" });
   const handledCompletionKeysRef = useRef(new Set<string>());
+  const promptedHealthyCheckinDayRef = useRef<string | null>(null);
+  const reopenHealthyCheckinAfterWorkRef = useRef(false);
 
   const dedupedWorkBlocks = useMemo(
     () => dedupeWorkBlocks(localLedgerState.workBlocks),
@@ -709,6 +749,44 @@ export default function HomePage() {
   }, [timerVisualState]);
 
   useEffect(() => {
+    const now = new Date();
+    const nextMidnight = new Date(now);
+    nextMidnight.setHours(24, 0, 0, 0);
+    const timeout = window.setTimeout(() => {
+      promptedHealthyCheckinDayRef.current = null;
+      setLocalDayKey(new Date().toDateString());
+    }, nextMidnight.getTime() - now.getTime() + 250);
+
+    return () => window.clearTimeout(timeout);
+  }, [localDayKey]);
+
+  useEffect(() => {
+    if (!workspaceUserId || !hasLoadedBehaviorEvents) {
+      return;
+    }
+
+    const checkinDay = getDateForDayOffset(-1).toDateString();
+    const outcomes = getHealthyOutcomesForDay(behaviorEvents, -1);
+    const isComplete = Object.values(outcomes).every((outcome) => outcome !== null);
+
+    const timeout = window.setTimeout(() => {
+      if (isComplete) {
+        setIsHealthyCheckinOpen(false);
+        return;
+      }
+
+      if (promptedHealthyCheckinDayRef.current !== checkinDay) {
+        promptedHealthyCheckinDayRef.current = checkinDay;
+        setHealthyCheckinOutcomes(outcomes);
+        setHealthyCheckinError(null);
+        setIsHealthyCheckinOpen(true);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [behaviorEvents, hasLoadedBehaviorEvents, localDayKey, workspaceUserId]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function connectWorkspace() {
@@ -764,10 +842,12 @@ export default function HomePage() {
 
           if (!cancelled) {
             setBehaviorEvents(behaviorEventRows);
+            setHasLoadedBehaviorEvents(true);
           }
         } catch {
           if (!cancelled) {
             setBehaviorEvents([]);
+            setHasLoadedBehaviorEvents(false);
           }
         }
         setPersistenceState({
@@ -819,6 +899,7 @@ export default function HomePage() {
         setDailyFocusItems([]);
         setDailyFocusNotice(null);
         setBehaviorEvents([]);
+        setHasLoadedBehaviorEvents(false);
         setPersistenceState({
           kind: "auth_required",
           message: AUTH_REQUIRED_MESSAGE,
@@ -853,8 +934,10 @@ export default function HomePage() {
           try {
             const behaviorEventRows = await fetchBehaviorEvents(supabase, user.id);
             setBehaviorEvents(behaviorEventRows);
+            setHasLoadedBehaviorEvents(true);
           } catch {
             setBehaviorEvents([]);
+            setHasLoadedBehaviorEvents(false);
           }
 
           setPersistenceState({
@@ -907,8 +990,70 @@ export default function HomePage() {
     try {
       const events = await fetchBehaviorEvents(supabase, userId);
       setBehaviorEvents(events);
+      setHasLoadedBehaviorEvents(true);
     } catch {
       setBehaviorEvents([]);
+      setHasLoadedBehaviorEvents(false);
+    }
+  };
+
+  const saveHealthyBehaviorOutcomes = async (
+    outcomes: HealthyBehaviorOutcomes,
+    dayOffset: number,
+  ) => {
+    if (!supabase || !workspaceUserId) {
+      throw new Error("Workspace is not connected yet.");
+    }
+
+    const occurredAt = getLocalMiddayTimestampForDayOffset(dayOffset);
+    const behaviorTypes: HealthyBehaviorType[] = ["gallon_water", "waking_routine"];
+
+    try {
+      for (const behaviorType of behaviorTypes) {
+        const succeeded = outcomes[behaviorType];
+
+        if (succeeded === null) {
+          continue;
+        }
+
+        const existing = behaviorEvents.find(
+          (event) => event.behavior_type === behaviorType &&
+            getDayOffsetFromTimestamp(event.occurred_at) === dayOffset,
+        );
+        const input = {
+          behaviorType,
+          healthyBehaviorSucceeded: succeeded,
+          note: existing?.note ?? undefined,
+          occurredAt,
+          userId: workspaceUserId,
+        };
+
+        if (existing) {
+          await updateBehaviorEvent(supabase, { ...input, eventId: existing.id });
+        } else {
+          await persistBehaviorEvent(supabase, input);
+        }
+      }
+    } catch (error) {
+      await reloadBehaviorEvents(workspaceUserId);
+      throw error;
+    }
+
+    await reloadBehaviorEvents(workspaceUserId);
+  };
+
+  const reopenMissingHealthyCheckin = () => {
+    if (!hasLoadedBehaviorEvents) {
+      return;
+    }
+
+    const outcomes = getHealthyOutcomesForDay(behaviorEvents, -1);
+
+    if (Object.values(outcomes).some((outcome) => outcome === null)) {
+      promptedHealthyCheckinDayRef.current = getDateForDayOffset(-1).toDateString();
+      setHealthyCheckinOutcomes(outcomes);
+      setHealthyCheckinError(null);
+      setIsHealthyCheckinOpen(true);
     }
   };
 
@@ -1080,6 +1225,7 @@ export default function HomePage() {
           ? current.workBlocks
           : [artifacts.workBlock, ...current.workBlocks],
       }));
+      reopenHealthyCheckinAfterWorkRef.current = true;
       await openAttributionDialog({
         ledgerEvent: artifacts.ledgerEvent,
         workBlock: artifacts.workBlock,
@@ -1148,6 +1294,7 @@ export default function HomePage() {
       if (uninterrupted) {
         setBreakRequest({ token: Date.now(), minutes: restMinutesForWorkMinutes(totalMinutes) });
       }
+      reopenHealthyCheckinAfterWorkRef.current = true;
       await openAttributionDialog({
         ledgerEvent: artifacts.ledgerEvent,
         workBlock: artifacts.workBlock,
@@ -1385,6 +1532,34 @@ export default function HomePage() {
     const occurredAt = getLocalMiddayTimestampForDayOffset(behaviorDialogState.dayOffset);
     setBehaviorDialogError(null);
 
+    if (isHealthyBehaviorType(behaviorDialogState.behaviorType)) {
+      if (Object.values(behaviorDialogState.healthyOutcomes).some((outcome) => outcome === null)) {
+        setBehaviorDialogError("Choose Yes or No for both healthy behaviors.");
+        return;
+      }
+
+      behaviorSaveInFlightRef.current = true;
+      setIsBehaviorSaving(true);
+
+      try {
+        await saveHealthyBehaviorOutcomes(
+          behaviorDialogState.healthyOutcomes,
+          behaviorDialogState.dayOffset,
+        );
+        setIsBehaviorDialogOpen(false);
+        setBehaviorDialogState(INITIAL_BEHAVIOR_DIALOG_STATE);
+        setBehaviorDialogMode({ kind: "create" });
+        setPersistenceState({ kind: "saved", message: "Healthy behaviors saved" });
+      } catch (error) {
+        setBehaviorDialogError(error instanceof Error ? error.message : "Could not save healthy behaviors.");
+      } finally {
+        behaviorSaveInFlightRef.current = false;
+        setIsBehaviorSaving(false);
+      }
+
+      return;
+    }
+
     if (behaviorDialogState.behaviorType === "screen_time") {
       const screenMinutes = Number.parseInt(behaviorDialogState.screenTimeMinutes, 10);
 
@@ -1471,6 +1646,9 @@ export default function HomePage() {
         event.behavior_type === "screen_time" ? String(event.duration_minutes ?? "") : "",
       exerciseMinutes: event.behavior_type === "exercise" ? String(event.duration_minutes ?? "") : "",
       note: event.note ?? "",
+      healthyOutcomes: isHealthyBehaviorType(event.behavior_type)
+        ? getHealthyOutcomesForDay(behaviorEvents, getDayOffsetFromTimestamp(event.occurred_at))
+        : EMPTY_HEALTHY_OUTCOMES,
     });
     setBehaviorDialogError(null);
     setIsBehaviorDialogOpen(true);
@@ -1478,6 +1656,26 @@ export default function HomePage() {
 
   const handleRequestDeleteBehavior = (event: BehaviorEvent) => {
     setBehaviorDeleteTarget(event);
+  };
+
+  const handleSaveHealthyCheckin = async () => {
+    if (Object.values(healthyCheckinOutcomes).some((outcome) => outcome === null)) {
+      setHealthyCheckinError("Choose Yes or No for both healthy behaviors.");
+      return;
+    }
+
+    setIsHealthyCheckinSaving(true);
+    setHealthyCheckinError(null);
+
+    try {
+      await saveHealthyBehaviorOutcomes(healthyCheckinOutcomes, -1);
+      setIsHealthyCheckinOpen(false);
+      setPersistenceState({ kind: "saved", message: "Yesterday's healthy behaviors saved" });
+    } catch (error) {
+      setHealthyCheckinError(error instanceof Error ? error.message : "Could not save healthy behaviors.");
+    } finally {
+      setIsHealthyCheckinSaving(false);
+    }
   };
 
   const handleConfirmDeleteBehavior = async () => {
@@ -1834,6 +2032,10 @@ export default function HomePage() {
         title: remaining[0]?.title ?? "",
       });
       setPersistenceState({ kind: "saved", message: "Task metadata saved" });
+      if (remaining.length === 0 && reopenHealthyCheckinAfterWorkRef.current) {
+        reopenHealthyCheckinAfterWorkRef.current = false;
+        reopenMissingHealthyCheckin();
+      }
     } catch (error) {
       setPersistenceState({
         kind: "error",
@@ -1845,6 +2047,10 @@ export default function HomePage() {
   const handleCompleteMetadataLater = () => {
     setMetadataQueue([]);
     setMetadataDraft({ area: "", description: "", dueAt: "", priority: "medium", title: "" });
+    if (reopenHealthyCheckinAfterWorkRef.current) {
+      reopenHealthyCheckinAfterWorkRef.current = false;
+      reopenMissingHealthyCheckin();
+    }
   };
 
   const handleMagicLinkSignIn = async () => {
@@ -2119,6 +2325,9 @@ export default function HomePage() {
           priority: "medium",
           title: createdTasksThisTurn[0].title,
         });
+      } else if (reopenHealthyCheckinAfterWorkRef.current) {
+        reopenHealthyCheckinAfterWorkRef.current = false;
+        reopenMissingHealthyCheckin();
       }
     } catch (error) {
       setPersistenceState({
@@ -2510,6 +2719,34 @@ export default function HomePage() {
       </Dialog>
 
       <Dialog
+        onClose={() => setIsHealthyCheckinOpen(false)}
+        open={isHealthyCheckinOpen}
+        title={`Yesterday (${formatCheckinDate(-1)}), did you accomplish…`}
+      >
+        <div className="space-y-5">
+          <HealthyBehaviorCheckin
+            disabled={isHealthyCheckinSaving}
+            onChange={(type, value) =>
+              setHealthyCheckinOutcomes((current) => ({ ...current, [type]: value }))
+            }
+            outcomes={healthyCheckinOutcomes}
+          />
+          <p className="text-xs leading-5 text-slate-500">
+            Yes adds 30 reward minutes. No subtracts 30 reward minutes.
+          </p>
+          {healthyCheckinError ? <p className="text-sm text-rose-700">{healthyCheckinError}</p> : null}
+          <Button
+            className="w-full"
+            disabled={isHealthyCheckinSaving}
+            onClick={handleSaveHealthyCheckin}
+            variant="secondary"
+          >
+            {isHealthyCheckinSaving ? "Saving…" : "Save daily check-in"}
+          </Button>
+        </div>
+      </Dialog>
+
+      <Dialog
         onClose={() => {
           setIsRewardDialogOpen(false);
           setRewardDialogMode({ kind: "create" });
@@ -2770,10 +3007,16 @@ export default function HomePage() {
                   key={tab.value}
                   aria-pressed={selected}
                   onClick={() =>
-                    setBehaviorDialogState((current) => ({
-                      ...current,
-                      behaviorType: tab.value === "healthy_behaviors" ? "waking_routine" : tab.value,
-                    }))
+                    setBehaviorDialogState((current) => {
+                      const behaviorType = tab.value === "healthy_behaviors" ? "waking_routine" : tab.value;
+                      return {
+                        ...current,
+                        behaviorType,
+                        healthyOutcomes: isHealthyBehaviorType(behaviorType)
+                          ? getHealthyOutcomesForDay(behaviorEvents, current.dayOffset)
+                          : current.healthyOutcomes,
+                      };
+                    })
                   }
                   variant={selected ? "primary" : "secondary"}
                 >
@@ -2787,7 +3030,13 @@ export default function HomePage() {
             disabled={isBehaviorSaving}
             label="Day of behavior"
             onChange={(dayOffset) =>
-              setBehaviorDialogState((current) => ({ ...current, dayOffset }))
+              setBehaviorDialogState((current) => ({
+                ...current,
+                dayOffset,
+                healthyOutcomes: isHealthyBehaviorType(current.behaviorType)
+                  ? getHealthyOutcomesForDay(behaviorEvents, dayOffset)
+                  : current.healthyOutcomes,
+              }))
             }
             value={behaviorDialogState.dayOffset}
           />
@@ -2844,35 +3093,35 @@ export default function HomePage() {
 
           {isHealthyBehaviorType(behaviorDialogState.behaviorType) ? (
             <div className="space-y-3">
-              <div className="grid gap-2 sm:grid-cols-2">
-                {(["waking_routine", "gallon_water"] as const).map((type) => {
-                  const selected = behaviorDialogState.behaviorType === type;
-
-                  return (
-                    <Button
-                      key={type}
-                      aria-pressed={selected}
-                      onClick={() =>
-                        setBehaviorDialogState((current) => ({ ...current, behaviorType: type }))
-                      }
-                      variant={selected ? "primary" : "secondary"}
-                    >
-                      {getBehaviorTypeLabel(type)}
-                    </Button>
-                  );
-                })}
-              </div>
+              <p className="text-sm font-medium text-slate-800">
+                {behaviorDialogState.dayOffset === 0 ? "Today" : "Selected day"} ({formatCheckinDate(behaviorDialogState.dayOffset)}), did you accomplish…
+              </p>
+              <HealthyBehaviorCheckin
+                disabled={isBehaviorSaving}
+                onChange={(type, value) =>
+                  setBehaviorDialogState((current) => ({
+                    ...current,
+                    healthyOutcomes: { ...current.healthyOutcomes, [type]: value },
+                  }))
+                }
+                outcomes={behaviorDialogState.healthyOutcomes}
+              />
+              <p className="text-xs leading-5 text-slate-500">
+                Yes adds 30 reward minutes. No subtracts 30 reward minutes.
+              </p>
             </div>
           ) : null}
 
-          <ActionField
-            label="Note"
-            onChange={(event) =>
-              setBehaviorDialogState((current) => ({ ...current, note: event.target.value }))
-            }
-            placeholder="Optional note"
-            value={behaviorDialogState.note}
-          />
+          {!isHealthyBehaviorType(behaviorDialogState.behaviorType) ? (
+            <ActionField
+              label="Note"
+              onChange={(event) =>
+                setBehaviorDialogState((current) => ({ ...current, note: event.target.value }))
+              }
+              placeholder="Optional note"
+              value={behaviorDialogState.note}
+            />
+          ) : null}
 
           {behaviorDialogError ? (
             <p className="text-sm text-rose-700">{behaviorDialogError}</p>
@@ -2888,7 +3137,9 @@ export default function HomePage() {
               ? "Saving..."
               : behaviorDialogMode.kind === "edit"
                 ? "Save changes"
-                : "Save behavior entry"}
+                : isHealthyBehaviorType(behaviorDialogState.behaviorType)
+                  ? "Save daily check-in"
+                  : "Save behavior entry"}
           </Button>
         </div>
       </Dialog>

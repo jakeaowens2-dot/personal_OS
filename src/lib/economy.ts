@@ -181,7 +181,7 @@ export function behaviorEventsToSettlementEvents(events: BehaviorEvent[]): Settl
       event.behavior_type === "gallon_water"
     ) {
       result.push({
-        kind: "credit",
+        kind: event.healthy_behavior_succeeded === false ? "penalty" : "credit",
         minutes: HEALTHY_BEHAVIOR_REWARD_MINUTES,
         at: event.occurred_at,
       });
@@ -325,7 +325,9 @@ export function buildWeeklyEconomyDays({
           event.behavior_type === "waking_routine" ||
           event.behavior_type === "gallon_water"
         ) {
-          return total + HEALTHY_BEHAVIOR_REWARD_MINUTES;
+          return event.healthy_behavior_succeeded === false
+            ? total
+            : total + HEALTHY_BEHAVIOR_REWARD_MINUTES;
         }
 
         return total;
@@ -333,7 +335,10 @@ export function buildWeeklyEconomyDays({
       penaltyMinutes: dayBehaviors
         .filter(
           (event) =>
-            event.behavior_type === "indulgence" || event.behavior_type === "screen_time",
+            event.behavior_type === "indulgence" ||
+            event.behavior_type === "screen_time" ||
+            ((event.behavior_type === "waking_routine" || event.behavior_type === "gallon_water") &&
+              event.healthy_behavior_succeeded === false),
         )
         .reduce((total, event) => total + (event.penalty_minutes ?? 0), 0),
     };

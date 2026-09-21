@@ -186,6 +186,7 @@ export type BehaviorEvent = {
   occurred_at: string;
   duration_minutes: number | null;
   penalty_minutes: number | null;
+  healthy_behavior_succeeded: boolean | null;
   note: string | null;
   deleted_at?: string | null;
   deleted_by_actor_label?: string | null;

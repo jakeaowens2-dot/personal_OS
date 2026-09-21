@@ -56,9 +56,10 @@ blocks — a single 50-minute work block earns ¼ of a weekday reward block.
 
 ## Healthy behaviors
 
-- Waking routine and one gallon of water each earn a fixed **+30 reward minutes**.
-- The bonus is derived from each durable behavior event, including historic entries.
-- Healthy behavior reward renders in the same **periwinkle** positive-behavior pool as exercise.
+- Healthy morning habits and one gallon of water each require a daily Yes/No result.
+- **Yes** earns **+30 reward minutes** and **No** creates a **−30 reward-minute penalty**.
+- The result is derived from each durable behavior event. Historic success-only entries remain Yes.
+- Successful healthy behavior renders in the periwinkle positive-behavior pool; failures render as penalties.
 
 ## Penalties (indulgence + screen time)
 
@@ -121,7 +122,7 @@ two-column reading order and shows a quiet daily time total beneath the group:
 | `WORK_BLOCK_WORK_MINUTES` | 50 | focused minutes per work block |
 | `WORK_BLOCK_REST_MINUTES` | 10 | implied rest minutes per work block |
 | `REWARD_BLOCK_MINUTES` | 60 | reward minutes per reward block |
-| `HEALTHY_BEHAVIOR_REWARD_MINUTES` | 30 | reward minutes per completed healthy behavior |
+| `HEALTHY_BEHAVIOR_REWARD_MINUTES` | 30 | reward minutes credited for Yes or penalized for No |
 | `ECONOMY_POLICY_V2_EFFECTIVE_AT` | 2026-09-05 midnight CT | new-policy boundary |
 | `LEGACY_WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK` | 20 | pre-rollout weekday rate |
 | `LEGACY_WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK` | 30 | pre-rollout weekend rate |
