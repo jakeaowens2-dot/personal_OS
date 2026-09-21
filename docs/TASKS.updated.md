@@ -22,7 +22,7 @@ Audited the real planning turn: two sourced memory revisions, five tool receipts
 
 ## Shared workspace surfaces — 2026-09-20
 
-Implemented locally: shared date/account/status/settings ribbon and route tabs for Work tracking (`/`), Personal Assistant (`/assistant`), and Task Management (`/settings/tasks`). Removed duplicate page branding/account headers; retained surface-specific controls. Compact tabs wrap labels on narrow screens. Home warns before a tab switch discards an unfinished timer; timer persistence across routes remains a separate limitation. Verified signed-in navigation across all three surfaces, desktop/mobile layouts, and the timer warning; typecheck/lint and 18 assistant regression tests passed. Not deployed: the assistant remains local-only.
+Implemented locally: shared date/account/status/settings ribbon and route tabs for Work tracking (`/`), Personal Assistant (`/assistant`), and Task Management (`/settings/tasks`). Removed duplicate page branding/account headers; retained surface-specific controls. Compact tabs wrap labels on narrow screens. The ribbon and tabs stay pinned together at the top while page content scrolls beneath their opaque background; verified against the long assistant conversation (2026-09-20). Home warns before a tab switch discards an unfinished timer; timer persistence across routes remains a separate limitation. Verified signed-in navigation across all three surfaces, desktop/mobile layouts, and the timer warning; typecheck/lint and 18 assistant regression tests passed. Not deployed: the assistant remains local-only.
 
 This file defines the phased rollout.
 

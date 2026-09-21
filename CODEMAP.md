@@ -342,4 +342,4 @@ When a task only changes internal logic inside an existing mapped file:
 - No update is required unless the file’s purpose changed.
 
 ### Shared workspace navigation
-- `src/components/workspace/WorkspaceHeader.tsx` and its CSS module render the account/date/status ribbon and Work tracking, Personal Assistant, Task Management route tabs. Home supplies its reset/sign-out actions and unfinished-timer guard.
+- `src/components/workspace/WorkspaceHeader.tsx` and its CSS module render the sticky, opaque account/date/status ribbon and Work tracking, Personal Assistant, Task Management route tabs. Home supplies its reset/sign-out actions and unfinished-timer guard.
