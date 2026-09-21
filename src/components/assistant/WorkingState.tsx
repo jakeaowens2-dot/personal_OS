@@ -276,19 +276,18 @@ function ProposalCard({ proposal: p, onResolve, busy }: {
       <div className={styles.proposalBody}>
         {view.previousTitle && <p className={styles.muted}>Previously: {view.previousTitle}</p>}
         <p className={styles.proposalDescription}>{view.description || "No description recorded."}</p>
+        {view.previousDescription && <p className={styles.muted}>Previous description: {view.previousDescription}</p>}
+        {view.progress && <p className={styles.proposalDescription}>Progress: {view.progress}</p>}
+        {view.previousProgress && <p className={styles.muted}>Previous progress: {view.previousProgress}</p>}
         <section className={styles.proposalDependencies} aria-label="Task dependencies">
           <h3>Before this</h3>
-          {view.dependencies.length ? <ul>{view.dependencies.map((dependency, index) => <li key={index}>{dependency}</li>)}</ul> : <p>No prerequisites recorded.</p>}
+          {view.dependencies.length ? <ul>{view.dependencies.map((dependency, index) => <li key={index}>{dependency}</li>)}</ul> : <p>{view.prerequisitesChanged ? "No prerequisites — replaces the previous list." : "No prerequisites recorded."}</p>}
+          {view.dependencyNotes.length > 0 && <p>Notes: {view.dependencyNotes.join("; ")}</p>}
         </section>
-        <div className={styles.proposalMeta}>
-          <span>Status: {view.previousStatus && `${view.previousStatus.replaceAll("_", " ")} → `}{view.status.replaceAll("_", " ")}</span>
+        {(view.previousStatus || view.previousPriority) && <div className={styles.proposalMeta}>
+          {view.previousStatus && <span>Change status: {view.previousStatus.replaceAll("_", " ")} → {view.status.replaceAll("_", " ")}</span>}
           {view.previousPriority && <span>Priority: {view.previousPriority} → {view.priority}</span>}
-        </div>
-        <details className={styles.proposalRationale}>
-          <summary>Why this change{view.previousDescription ? " · previous note" : ""}</summary>
-          <p>{p.reason}</p>
-          {view.previousDescription && <p>Previous note: {view.previousDescription}</p>}
-        </details>
+        </div>}
         {pending && <div className={styles.proposalActions}>
           <button type="button" disabled={busy} onClick={() => onResolve(p.id, true)}>Accept {p.before_json ? "change" : "task"}</button>
           <button type="button" disabled={busy} onClick={() => onResolve(p.id, false)}>Reject</button>

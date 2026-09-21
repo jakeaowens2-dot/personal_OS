@@ -1,5 +1,11 @@
 # Tasks
 
+## Reviewed descriptions and task prerequisites — 2026-09-20
+
+Completed and activated: canonical task descriptions plus explicit task-ID prerequisites through the existing review/approval flow; separate progress notes; owned references, cycle checks and prerequisite snapshot conflicts; readable prerequisite names. Cards use a transparent fill and omit rationale/routine status. Typecheck/lint, 20 tests, full SQL suite via isolated PostgreSQL/PGlite and live Hermes saved-plan recall/correction/progress/fresh-session replay passed. The replay could not write real account data. Supabase migration applied with permissions verified and existing record counts unchanged. See `ASSISTANT_PREREQUISITES_20260920.md`.
+
+Remaining: clarify outreach cadence before recurrence; normal real-user closeout/opening acceptance. No recurring engine or automatic task acceptance was added.
+
 ## Task review cards and live pilot audit — 2026-09-20
 
 Completed locally: individual task cards, prominent semantic priority chips, one title, description-first body, secondary prerequisites and inspectable rationale/previous values. Accepted/rejected cards collapse automatically and can reopen; accepted status reads “Task change accepted.” No mutation contract changed. Typecheck/lint, 19 assistant tests and signed-in desktop/mobile inspection passed.

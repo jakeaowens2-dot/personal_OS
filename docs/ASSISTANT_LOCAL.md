@@ -122,6 +122,10 @@ active endpoint uses `hermes.ts` and `hermes-planning-worker.py`.
   idempotent approval/task creation, and a handoff with more than three items, uncertainty, and explicit accounting
   for a prior-day commitment.
   The runner removes its test container. Requires Docker; never targets live data.
+  If Docker is unavailable, install `@electric-sql/pglite` in a temporary directory
+  outside the repo and run `ASSISTANT_TEST_PGLITE_MODULE=/absolute/path/to/package
+  node scripts/assistant-db-pglite.cjs` (one shell command). This fallback runs the
+  same SQL in isolated PostgreSQL with no live database connection.
 - `npm run typecheck`, `npm run lint`, `npm run build`.
 - `npm run test:assistant:live` is opt-in and consumes the existing ChatGPT
   subscription using only fictional data in a temporary profile. Evidence is
@@ -133,9 +137,11 @@ active endpoint uses `hermes.ts` and `hermes-planning-worker.py`.
   Test data was fictional, outside real application state. Test credentials were
   removed afterward. This verifies the adapter, not activation of the hosted schema.
 
-Pending real-user acceptance: authenticate locally, verify
-an actual task/focus read, a real memory correction, approved task update, and
-closeout/opening in the signed-in browser. No production deployment or Git push
+Signed-in real memory writes and approved task creation are verified. Description/
+prerequisite writes are active after the 2026-09-20 additive migration. Isolated
+real-plan replay passed recall, correction, progress and fresh-session recovery;
+see `ASSISTANT_PREREQUISITES_20260920.md`. Real-user closeout/opening and routine
+correction acceptance remain to be exercised. No production deployment or Git push
 is part of this slice. The branch is `codex/assistant-daily-planning`; unrelated
 existing economy/history work has been preserved.
 

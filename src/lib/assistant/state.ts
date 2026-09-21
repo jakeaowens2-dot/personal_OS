@@ -59,6 +59,8 @@ export type TaskPatch = {
   status?: "open" | "in_progress" | "blocked" | "completed";
   priority?: "low" | "medium" | "high" | "critical";
   human_summary?: string;
+  description?: string;
+  prerequisite_task_ids?: string[];
 };
 export type TaskProposal = {
   id: string;
@@ -66,11 +68,12 @@ export type TaskProposal = {
   task_id: string | null;
   expected_updated_at: string | null;
   patch_json: TaskPatch;
-  before_json: (TaskPatch & {
+  before_json: (Omit<TaskPatch, "description" | "prerequisite_task_ids"> & {
     title: string;
     description?: string | null;
-    agent_payload_json?: { dependencies?: string[] };
+    agent_payload_json?: { dependencies?: string[]; prerequisite_task_ids?: string[] };
   }) | null;
+  prerequisite_snapshot_json?: { id: string; title: string; status: string; updated_at: string }[] | null;
   reason: string;
   source_ids: string[];
   status: "pending" | "applied" | "rejected";
@@ -228,7 +231,7 @@ export function parseEntry(kind: MemoryKind, value: unknown): MemoryEntry {
       };
 }
 export function parseTaskPatch(value: unknown): TaskPatch {
-  const v = object(value, ["title", "status", "priority", "human_summary"]);
+  const v = object(value, ["title", "status", "priority", "human_summary", "description", "prerequisite_task_ids"]);
   const patch: TaskPatch = {};
   if (!Object.keys(v).length)
     throw new Error("An empty proposal changes nothing.");
@@ -249,5 +252,17 @@ export function parseTaskPatch(value: unknown): TaskPatch {
     ] as const);
   if (v.human_summary !== undefined)
     patch.human_summary = string(v.human_summary, "Progress note");
+  if (v.description !== undefined) {
+    if (typeof v.description !== "string" || v.description.length > 6000)
+      throw new Error("Description must be text, at most 6000 characters.");
+    patch.description = v.description;
+  }
+  if (v.prerequisite_task_ids !== undefined) {
+    if (!Array.isArray(v.prerequisite_task_ids) || v.prerequisite_task_ids.length > 30)
+      throw new Error("Provide at most 30 prerequisite task IDs.");
+    patch.prerequisite_task_ids = v.prerequisite_task_ids.map(uuid);
+    if (new Set(patch.prerequisite_task_ids).size !== patch.prerequisite_task_ids.length)
+      throw new Error("Prerequisite task IDs must be unique.");
+  }
   return patch;
 }

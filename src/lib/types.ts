@@ -82,6 +82,7 @@ export type TaskAgentPayload = {
   constraints?: string[];
   decision_log?: string[];
   dependencies?: string[];
+  prerequisite_task_ids?: string[];
   objective?: string;
   open_questions?: string[];
   related_entities?: string[];

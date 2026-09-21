@@ -432,7 +432,7 @@
   margin-top: 0.8rem;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 28%, transparent);
   font-size: 0.85rem;
   overflow: hidden;
 }
@@ -474,9 +474,6 @@
 .proposalDependencies p { font-size: 0.78rem; }
 .proposalDependencies ul { padding-left: 1rem; list-style: disc; }
 .proposalMeta { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; margin-top: 1rem; color: var(--muted); font-size: 0.75rem; }
-.proposalRationale { margin-top: 0.7rem; font-size: 0.75rem; color: var(--muted); }
-.proposalRationale summary { cursor: pointer; }
-.proposalRationale p { margin-top: 0.4rem; line-height: 1.6; }
 @media (max-width: 500px) {
   .proposalSummary { gap: 0.5rem; padding: 0.8rem; }
   .proposalBody { padding: 0 0.8rem 1rem; }

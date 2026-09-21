@@ -319,9 +319,23 @@ test("proposal cards present the proposed snapshot without inventing dependency 
   assert.equal(changed.priority, "high");
   assert.equal(changed.previousPriority, "low");
   assert.equal(changed.description, "Delivered");
-  assert.equal(changed.previousDescription, "Previous progress");
-  assert.deepEqual(changed.dependencies, ["Deliver report"]);
+  assert.equal(changed.previousProgress, "Previous progress");
+  assert.deepEqual(changed.dependencies, []);
+  assert.deepEqual(changed.dependencyNotes, ["Deliver report"]);
   assert.equal(changed.status, "completed");
   const cleared = proposalPresentation({ before_json: { title: "Task", human_summary: "Outdated" }, patch_json: { human_summary: "" } });
   assert.equal(cleared.description, "");
+});
+
+
+test("descriptions, progress and prerequisite replacements retain distinct semantics", () => {
+  const { proposalPresentation } = require("../src/lib/assistant/proposal-presentation.ts");
+  assert.deepEqual(parseTaskPatch({ description: "", prerequisite_task_ids: [] }), { description: "", prerequisite_task_ids: [] });
+  for (const patch of [{ description: null }, { description: "x".repeat(6001) }, { prerequisite_task_ids: ["not-a-task"] }, { prerequisite_task_ids: [id, id] }, { prerequisite_task_ids: null }]) assert.throws(() => parseTaskPatch(patch));
+  const view = proposalPresentation({ before_json: { title: "Case study", description: "Original purpose", human_summary: "Not started" }, patch_json: { description: "Sales-ready case study", human_summary: "Draft started", prerequisite_task_ids: [id] }, prerequisite_snapshot_json: [{ id, title: "Deliver report", status: "completed" }] });
+  assert.equal(view.description, "Sales-ready case study");
+  assert.equal(view.progress, "Draft started");
+  assert.equal(view.previousDescription, "Original purpose");
+  assert.equal(view.previousProgress, "Not started");
+  assert.deepEqual(view.dependencies, ["Deliver report · completed"]);
 });

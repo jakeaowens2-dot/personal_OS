@@ -380,6 +380,7 @@ Suggested fields:
 Rules:
 - Treat missing or malformed payloads as recoverable.
 - Preserve unknown keys where practical.
+- Implemented assistant prerequisite links use `prerequisite_task_ids`: up to 30 unique owned canonical task UUIDs. Existing free-text `dependencies` are notes, not links. Reviewed replacement validates availability and cycles, snapshots referenced task versions, and rechecks them at approval. Empty array explicitly clears the links; no automatic scheduling/status changes are implied.
 - Do not store full chat transcripts in task payloads.
 - Keep payloads compact enough to be included in planning context packets.
 

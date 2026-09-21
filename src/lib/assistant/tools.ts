@@ -96,7 +96,7 @@ export const PLANNING_TOOLS = [
   {
     name: "propose_task",
     description:
-      "Persist a REVIEWABLE task creation/status/priority/progress proposal. Does not change the task. Use null task_id/expected_updated_at for a new task; otherwise provide the current updated_at. Never claim it is applied until current app state says applied.",
+      "Persist a REVIEWABLE task creation/description/prerequisites/status/priority/progress proposal. Does not change the task. Use null task_id/expected_updated_at for a new task; otherwise provide the current updated_at. Use description for task purpose/deliverable and human_summary for progress. prerequisite_task_ids replaces the prerequisite list with existing owned task UUIDs (empty clears). First read their current state; no invented IDs or pending-proposal IDs. Never claim it is applied until current app state says applied.",
     parameters: shape({
       task_id: { type: ["string", "null"] },
       expected_updated_at: { type: ["string", "null"] },
@@ -106,6 +106,8 @@ export const PLANNING_TOOLS = [
           status: enumeration(["open", "in_progress", "blocked", "completed"]),
           priority: enumeration(["low", "medium", "high", "critical"]),
           human_summary: text,
+          description: { type: "string", maxLength: 6000 },
+          prerequisite_task_ids: { type: "array", items: { type: "string", format: "uuid" }, maxItems: 30, uniqueItems: true },
         },
         [],
       ),
@@ -221,7 +223,7 @@ export function createPlanningToolHandler(options: {
         .select(
           isHistory
             ? "id,turn_id,role,text,local_date,created_at,source_message_id"
-            : "id,title,status,priority,human_summary,due_at,updated_at",
+            : "id,title,description,status,priority,human_summary,agent_payload_json,due_at,updated_at",
         )
         .eq("user_id", userId);
       const ids = v[isHistory ? "source_ids" : "task_ids"];

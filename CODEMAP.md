@@ -177,7 +177,11 @@ Current files:
 - `src/lib/assistant/hermes.ts` and `scripts/hermes-planning-worker.py` run the dedicated native Hermes loop with fixed application tools and profile-scoped history.
 - `src/lib/assistant/state.ts`, `store.ts`, `tools.ts`, and `planning-prompt.ts` own canonical types/validation, current context, tool contracts, and planning instructions.
 - `src/components/assistant/WorkingState.tsx` renders memory, carry-forward reviews, and collapsible task cards with priority chips and approval status.
-- `src/lib/assistant/proposal-presentation.ts` derives proposal display values and preserves actual recorded prerequisites.
+- `src/lib/assistant/proposal-presentation.ts` separates descriptions/progress and resolves reviewed prerequisite snapshots for cards.
+- `supabase/migrations/20260921000000_assistant_task_prerequisites.sql` adds reviewed descriptions, task-ID prerequisites, graph validation and approval snapshots.
+- `scripts/assistant-prerequisites.test.sql` covers link/description approval invariants; `assistant-db-pglite.cjs` is an optional isolated Docker-free SQL runner.
+- `scripts/assistant-plan-replay.cjs` evaluates real Hermes recall/corrections/proposals against an isolated saved-plan copy.
+- `docs/ASSISTANT_PREREQUISITES_20260920.md` records the contract, verification and live migration activation.
 - `docs/ASSISTANT_PILOT_REVIEW_20260920.md` audits the first real planning turn, saved memory/tasks, and remaining continuity/dependency gaps.
 - `supabase/migrations/20260912000000_assistant_daily_planning.sql` owns assistant storage, RLS, leases, revision-safe memory writes and atomic task approval.
 - `scripts/assistant-planning.test.cjs` and `assistant-db.test.{cjs,sql}` verify boundaries and disposable-database acceptance; `assistant-hermes.smoke.cjs` is the opt-in subscription-backed runtime check.

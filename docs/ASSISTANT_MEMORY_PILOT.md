@@ -19,8 +19,10 @@ IDs; the database rejects omissions. Correcting a dated handoff requests a new
 review revision for that same date. Core entries record source-backed
 last-confirmed timestamps in addition to revision/update dates.
 
-Task scope is intentionally narrow: create, title, status, priority, and progress
-summary. The assistant can propose; only the user-facing Apply transaction changes
+Task scope is intentionally narrow: create, title, description, status, priority,
+progress summary and explicit prerequisite task IDs. The 2026-09-20 extension
+preserves progress separately from descriptions and checks owned references, cycles
+and prerequisite snapshots at approval; see `ASSISTANT_PREREQUISITES_20260920.md`. The assistant can propose; only the user-facing Apply transaction changes
 the canonical task and triggers its existing revision log. Daily focus and ledger
 writes remain outside this toolset. This does not implement the entire later
 `TaskMutationProposalBatch` contract.
@@ -42,10 +44,12 @@ cadence drift and dependency/recurrence limits, and `ASSISTANT_LOCAL.md` for ope
 
 Task review UI (2026-09-20): each proposed change has its own card, a semantic
 priority chip, a single title, primary descriptive text and secondary prerequisites.
-Prior values and rationale remain inspectable. Pending cards begin expanded;
+Prior changed values remain inspectable; rationale stays in the audit record rather
+than the card. The routine status line is omitted. Pending cards begin expanded;
 accepted/rejected cards collapse and can reopen. Only actual recorded dependencies
-are shown. The write tool still supports progress summaries, not canonical
-descriptions or prerequisite changes; extending that contract is separate work.
+are shown. Reviewed writes now support canonical descriptions and prerequisite
+task IDs, with progress summaries remaining separate. No recurring task engine
+or automatic dependent-task status change is implied.
 
 ## Purpose and ownership
 

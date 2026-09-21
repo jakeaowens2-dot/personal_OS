@@ -166,7 +166,7 @@ export async function buildAssistantContext(
     buildPlanningContextPacket(client, userId),
     client
       .from("tasks")
-      .select("id,title,status,priority,human_summary,due_at,updated_at")
+      .select("id,title,description,status,priority,human_summary,agent_payload_json,due_at,updated_at")
       .eq("user_id", userId)
       .neq("status", "archived")
       .order("updated_at", { ascending: false })
