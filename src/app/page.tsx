@@ -3,40 +3,54 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type InputHTMLAttributes } from "react";
 import { EmailAuthPanel, type EmailAuthPanelState } from "@/components/auth/EmailAuthPanel";
-import { LedgerEventList, type ActivityItem } from "@/components/ledger/LedgerEventList";
+import {
+  HealthyBehaviorCheckin,
+  type HealthyBehaviorOutcomes,
+} from "@/components/behaviors/HealthyBehaviorCheckin";
+import { LedgerEventList } from "@/components/ledger/LedgerEventList";
 import { MiniBlocks } from "@/components/overview/MiniBlocks";
 import { OverviewModule } from "@/components/overview/OverviewModule";
 import { WeeklyOverview } from "@/components/overview/WeeklyOverview";
 import { PomodoroTimer, type SessionEndInfo, type TimerStatus } from "@/components/timer/PomodoroTimer";
 import { Button } from "@/components/ui/Button";
+import { DayOffsetSelector } from "@/components/ui/DayOffsetSelector";
 import { Dialog } from "@/components/ui/Dialog";
 import { WorkspaceHeader } from "@/components/workspace/WorkspaceHeader";
 import { TaskPriorityLabel } from "@/components/ui/TaskPriorityLabel";
 import { dedupeLedgerEvents } from "@/lib/ledger";
 import {
+  getDayOffsetFromTimestamp,
+  getDateForDayOffset,
+  getTimestampForDayOffset,
+  getLocalMiddayTimestampForDayOffset,
+} from "@/lib/dates";
+import { pacificWallTime, recordDateKey, shiftDateKey, wakingDateKey } from "@/lib/activity-day";
+import {
   computeScreenTimePenalty,
   fetchBehaviorEvents,
-  getBehaviorExerciseMinutes,
+  getPositiveBehaviorRewardMinutes,
   getBehaviorTypeLabel,
   hardDeleteBehaviorEvent,
   INDULGENCE_PENALTY_MINUTES,
+  isHealthyBehaviorSuccess,
+  isHealthyBehaviorType,
   persistBehaviorEvent,
   updateBehaviorEvent,
 } from "@/lib/behaviors";
 import { getModeDurationMinutes } from "@/lib/timer";
 import {
   behaviorEventsToSettlementEvents,
+  buildWeeklyEconomyDays,
   computeSettlement,
-  getWorkDurationMinutes,
   isWeekendDate,
   ledgerEventsToSettlementEvents,
   REWARD_BLOCK_MINUTES,
   restMinutesForWorkMinutes,
-  rewardMinutesForWorkMinutes,
   WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK,
   WEEKEND_REWARD_MULTIPLIER_LABEL,
   WORK_BLOCK_WORK_MINUTES,
 } from "@/lib/economy";
+import type { ActivityItem } from "@/lib/history";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   addTaskToDailyFocus,
@@ -44,33 +58,36 @@ import {
   ensureHousekeepingTask,
   fetchDailyFocusItems,
   fetchMostRecentAttributedTaskId,
-  fetchTasks,
   fetchTasksByIds,
   TASK_PRIORITY_ORDER,
   updateTask,
 } from "@/lib/tasks";
+import { fetchTaskLibrary, selectLibraryTasks, type LibraryTask, type LibrarySort } from "@/lib/task-library";
 import { exercisePalette, penaltyPalette, rewardPalette, timerPalette } from "@/lib/timerPalette";
 import {
   AUTH_REQUIRED_MESSAGE,
   ensureWorkspaceUser,
   fetchAttributionSelectionsForWorkBlock,
   fetchWorkspaceData,
-  getManualWorkDefaultsFromLedgerEvent,
+  getWorkEntryDefaultsFromLedgerEvent,
   getRewardSpendDefaultsFromLedgerEvent,
   hardDeleteLedgerEvent,
   hardResetWorkspace,
   isEditableLedgerEvent,
   persistCompletedWorkSession,
   persistManualWorkBlock,
+  createManualWorkArtifactIds,
+  type ManualWorkArtifactIds,
   persistRewardSpend,
   persistWorkBlockAttributions,
-  updateManualWorkEntry,
+  updateWorkEntry,
   updateRewardSpendEntry,
 } from "@/lib/workspace";
 import { archiveTask, completeDailyFocusItem, completeTask, dropDailyFocusItem, removeTaskFromDailyFocus } from "@/lib/tasks";
 import type {
   BehaviorEvent,
   BehaviorType,
+  HealthyBehaviorType,
   DailyFocusItemWithTask,
   LedgerEvent,
   Task,
@@ -122,19 +139,35 @@ type RewardDialogMode =
 
 type BehaviorDialogState = {
   behaviorType: BehaviorType;
+  dayOffset: number;
   screenTimeMinutes: string;
-  screenTimeDate: string;
   exerciseMinutes: string;
   note: string;
+  healthyOutcomes: HealthyBehaviorOutcomes;
+};
+
+const EMPTY_HEALTHY_OUTCOMES: HealthyBehaviorOutcomes = {
+  gallon_water: null,
+  waking_routine: null,
 };
 
 const INITIAL_BEHAVIOR_DIALOG_STATE: BehaviorDialogState = {
   behaviorType: "indulgence",
+  dayOffset: 0,
   screenTimeMinutes: "",
-  screenTimeDate: "",
   exerciseMinutes: "",
   note: "",
+  healthyOutcomes: EMPTY_HEALTHY_OUTCOMES,
 };
+
+type BehaviorTab = "indulgence" | "screen_time" | "exercise" | "healthy_behaviors";
+
+const BEHAVIOR_TABS: { label: string; value: BehaviorTab }[] = [
+  { label: "Indulgent behavior", value: "indulgence" },
+  { label: "Screen time", value: "screen_time" },
+  { label: "Exercise", value: "exercise" },
+  { label: "Healthy behaviors", value: "healthy_behaviors" },
+];
 
 type PendingSessionEnd = {
   completedAt: string;
@@ -143,17 +176,6 @@ type PendingSessionEnd = {
 
 type BehaviorDialogMode = { kind: "create" } | { kind: "edit"; event: BehaviorEvent };
 
-function isToday(isoTimestamp: string) {
-  const now = new Date();
-  const date = new Date(isoTimestamp);
-
-  return (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  );
-}
-
 function formatTimestamp(isoTimestamp: string) {
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
@@ -161,6 +183,30 @@ function formatTimestamp(isoTimestamp: string) {
     month: "short",
     day: "numeric",
   }).format(new Date(isoTimestamp));
+}
+
+function getHealthyOutcomesForDay(
+  events: BehaviorEvent[],
+  dayOffset: number,
+): HealthyBehaviorOutcomes {
+  const outcomes = { ...EMPTY_HEALTHY_OUTCOMES };
+
+  for (const event of events) {
+    if (
+      isHealthyBehaviorType(event.behavior_type) &&
+      getDayOffsetFromTimestamp(event.occurred_at, event.activity_date) === dayOffset
+    ) {
+      outcomes[event.behavior_type] = isHealthyBehaviorSuccess(event);
+    }
+  }
+
+  return outcomes;
+}
+
+function formatCheckinDate(dayOffset: number) {
+  return new Intl.DateTimeFormat("en-US", { month: "numeric", day: "numeric" }).format(
+    getDateForDayOffset(dayOffset),
+  );
 }
 
 function getWeekStart(date: Date) {
@@ -176,12 +222,6 @@ function shiftWeeks(date: Date, weeks: number) {
   const shifted = new Date(date);
   shifted.setDate(shifted.getDate() + weeks * 7);
   return shifted;
-}
-
-function isWithinWeek(isoTimestamp: string, weekStart: Date) {
-  const date = new Date(isoTimestamp);
-  const weekEnd = shiftWeeks(weekStart, 1);
-  return date >= weekStart && date < weekEnd;
 }
 
 function formatWeekRangeLabel(weekStart: Date) {
@@ -232,12 +272,6 @@ function formatRewardMinutes(totalMinutes: number) {
   return `${prefix}${hours}:${minutes.toString().padStart(2, "0")}`;
 }
 
-function toDateInputValue(isoTimestamp: string) {
-  const date = new Date(isoTimestamp);
-  const offsetDate = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000);
-  return offsetDate.toISOString().slice(0, 10);
-}
-
 function formatDurationLabel(hours: number, minutes: number) {
   const parts = [];
 
@@ -252,16 +286,11 @@ function formatDurationLabel(hours: number, minutes: number) {
   return parts.join(" ");
 }
 
-function getRewardReportDate(dayOffset: number) {
-  const date = new Date();
-  // Reward reports currently capture the day only, so we normalize to local midday
-  // to persist a stable, non-edge-case timestamp for that calendar date.
-  date.setHours(12, 0, 0, 0);
-  date.setDate(date.getDate() + dayOffset);
-  return date;
+function getDayOffsetDate(dayOffset: number) {
+  return pacificWallTime(shiftDateKey(wakingDateKey(), dayOffset));
 }
 
-function formatRewardReportDate(dayOffset: number) {
+function formatDayOffsetDate(dayOffset: number) {
   if (dayOffset === 0) {
     return "Today";
   }
@@ -274,7 +303,7 @@ function formatRewardReportDate(dayOffset: number) {
     weekday: "short",
     month: "short",
     day: "numeric",
-  }).format(getRewardReportDate(dayOffset));
+  }).format(getDayOffsetDate(dayOffset));
 }
 
 type ActionFieldProps = {
@@ -307,7 +336,7 @@ type AttributionFieldsProps = {
   durationMinutes: number;
   emptyStateMessage: string;
   onCreateTask: (title: string) => Promise<void>;
-  onLoadLibrary: () => Promise<Task[]>;
+  onLoadLibrary: () => Promise<LibraryTask[]>;
   onSelectLibraryTask: (task: Task) => void;
   onToggleTask: (taskId: string) => void;
   selectedTaskIds: string[];
@@ -329,7 +358,10 @@ function AttributionFields({
   const [creatingTask, setCreatingTask] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [libraryQuery, setLibraryQuery] = useState("");
-  const [libraryTasks, setLibraryTasks] = useState<Task[]>([]);
+  const [libraryTasks, setLibraryTasks] = useState<LibraryTask[]>([]);
+  const [librarySort, setLibrarySort] = useState<LibrarySort>("recent_activity");
+  const [includeCompleted, setIncludeCompleted] = useState(false);
+  const [libraryLimit, setLibraryLimit] = useState(12);
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [libraryError, setLibraryError] = useState<string | null>(null);
 
@@ -337,6 +369,7 @@ function AttributionFields({
     setShowLibrary(true);
     setLoadingLibrary(true);
     setLibraryError(null);
+    setLibraryLimit(12);
 
     try {
       setLibraryTasks(await onLoadLibrary());
@@ -376,13 +409,8 @@ function AttributionFields({
     setNewTaskTitle("");
   };
 
-  const filteredLibraryTasks = libraryTasks.filter((task) => {
-    if (task.id === choresTask.id) {
-      return false;
-    }
-
-    const query = libraryQuery.trim().toLowerCase();
-    return query.length === 0 || task.title.toLowerCase().includes(query);
+  const filteredLibraryTasks = selectLibraryTasks(libraryTasks.filter((task) => task.id !== choresTask.id), {
+    query: libraryQuery, sort: librarySort, includeCompleted,
   });
 
   return (
@@ -492,17 +520,31 @@ function AttributionFields({
           <input
             autoFocus
             className={inputClassName()}
-            onChange={(event) => setLibraryQuery(event.target.value)}
+            onChange={(event) => { setLibraryQuery(event.target.value); setLibraryLimit(12); }}
+            aria-label="Search task library"
             placeholder="Search your tasks"
             value={libraryQuery}
           />
+          <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-600">
+            <select aria-label="Sort task library" className={inputClassName()}
+              value={librarySort} onChange={(event) => { setLibrarySort(event.target.value as LibrarySort); setLibraryLimit(12); }}>
+              <option value="recent_activity">Recent activity</option>
+              <option value="last_used">Last used</option>
+              <option value="newest">Newest created</option>
+            </select>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={includeCompleted}
+                onChange={(event) => { setIncludeCompleted(event.target.checked); setLibraryLimit(12); }} />
+              Include completed
+            </label>
+          </div>
           <div className="max-h-96 space-y-1 overflow-y-auto pr-1">
             {loadingLibrary ? (
               <p className="px-1 py-2 text-sm text-slate-500">Loading task library…</p>
             ) : libraryError ? (
               <p className="px-1 py-2 text-sm text-rose-700">{libraryError}</p>
             ) : filteredLibraryTasks.length > 0 ? (
-              filteredLibraryTasks.map((task) => (
+              filteredLibraryTasks.slice(0, libraryLimit).map((task) => (
                 <button
                   key={task.id}
                   className="flex w-full items-center justify-between gap-3 rounded-[0.6rem] px-2 py-2 text-left transition hover:bg-slate-100"
@@ -512,6 +554,11 @@ function AttributionFields({
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-slate-950">{task.title}</p>
                     <TaskPriorityLabel area={task.area} priority={task.priority} />
+                    <p className="text-xs text-slate-500">
+                      {task.status === "completed" ? "Completed · " : ""}
+                      {task.last_used_at ? "Last used " : "Created "}
+                      {new Date(task.last_used_at ?? task.created_at).toLocaleDateString()}
+                    </p>
                   </div>
                   <span className="shrink-0 text-sm text-[var(--accent)]">Select</span>
                 </button>
@@ -520,6 +567,12 @@ function AttributionFields({
               <p className="px-1 py-2 text-sm text-slate-500">No matching tasks.</p>
             )}
           </div>
+          {!loadingLibrary && !libraryError && filteredLibraryTasks.length > 0 && (
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span>{Math.min(libraryLimit, filteredLibraryTasks.length)} of {filteredLibraryTasks.length} tasks</span>
+              {filteredLibraryTasks.length > libraryLimit && <Button variant="text" onClick={() => setLibraryLimit((value) => value + 12)}>Show more</Button>}
+            </div>
+          )}
         </div>
       </Dialog>
     </>
@@ -527,6 +580,11 @@ function AttributionFields({
 }
 
 export default function HomePage() {
+  const [wakingDay, setWakingDay] = useState(wakingDateKey);
+  useEffect(() => {
+    const timer = setInterval(() => setWakingDay(wakingDateKey()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
   const [localLedgerState, setLocalLedgerState] = useState(INITIAL_STATE);
   const [persistenceState, setPersistenceState] = useState<PersistenceState>({
@@ -554,6 +612,7 @@ export default function HomePage() {
   const [manualWorkDialogMode, setManualWorkDialogMode] = useState<ManualWorkDialogMode>({ kind: "create" });
   const [manualWorkMinutes, setManualWorkMinutes] = useState("50");
   const [manualWorkNote, setManualWorkNote] = useState("");
+  const [manualWorkDayOffset, setManualWorkDayOffset] = useState(0);
   const [isManualDialogOpen, setIsManualDialogOpen] = useState(false);
   const [isRewardDialogOpen, setIsRewardDialogOpen] = useState(false);
   const [rewardDialogMode, setRewardDialogMode] = useState<RewardDialogMode>({ kind: "create" });
@@ -564,9 +623,17 @@ export default function HomePage() {
   const [ledgerDeleteDialogState, setLedgerDeleteDialogState] = useState<LedgerEvent | null>(null);
   const [isResetDialogOpen, setIsResetDialogOpen] = useState(false);
   const [behaviorEvents, setBehaviorEvents] = useState<BehaviorEvent[]>([]);
+  const [hasLoadedBehaviorEvents, setHasLoadedBehaviorEvents] = useState(false);
   const [isBehaviorDialogOpen, setIsBehaviorDialogOpen] = useState(false);
   const [behaviorDialogState, setBehaviorDialogState] = useState<BehaviorDialogState>(INITIAL_BEHAVIOR_DIALOG_STATE);
   const [behaviorDialogMode, setBehaviorDialogMode] = useState<BehaviorDialogMode>({ kind: "create" });
+  const [behaviorDialogError, setBehaviorDialogError] = useState<string | null>(null);
+  const [isBehaviorSaving, setIsBehaviorSaving] = useState(false);
+  const [isHealthyCheckinOpen, setIsHealthyCheckinOpen] = useState(false);
+  const [healthyCheckinOutcomes, setHealthyCheckinOutcomes] =
+    useState<HealthyBehaviorOutcomes>(EMPTY_HEALTHY_OUTCOMES);
+  const [healthyCheckinError, setHealthyCheckinError] = useState<string | null>(null);
+  const [isHealthyCheckinSaving, setIsHealthyCheckinSaving] = useState(false);
   const [behaviorDeleteTarget, setBehaviorDeleteTarget] = useState<BehaviorEvent | null>(null);
   const [breakRequest, setBreakRequest] = useState<{ token: number; minutes: number } | null>(null);
   const [pendingSessionEnd, setPendingSessionEnd] = useState<PendingSessionEnd | null>(null);
@@ -580,6 +647,14 @@ export default function HomePage() {
     title: string;
   }>({ area: "", description: "", dueAt: "", priority: "medium", title: "" });
   const handledCompletionKeysRef = useRef(new Set<string>());
+  const behaviorSaveInFlightRef = useRef(false);
+  const manualWorkSaveInFlightRef = useRef(false);
+  const attributionSaveInFlightRef = useRef(false);
+  const [isManualWorkSaving, setIsManualWorkSaving] = useState(false);
+  const [isAttributionSaving, setIsAttributionSaving] = useState(false);
+  const manualSubmissionRef = useRef<{ ids: ManualWorkArtifactIds; completedAt: string; attributionIds: Record<string, string> } | null>(null);
+  const attributionSubmissionRef = useRef<{ workBlockId: string; ids: Record<string, string> } | null>(null);
+  const promptedHealthyCheckinDayRef = useRef<string | null>(null);
 
   const dedupedWorkBlocks = useMemo(
     () => dedupeWorkBlocks(localLedgerState.workBlocks),
@@ -594,13 +669,13 @@ export default function HomePage() {
   const todaysWorkMinutes = useMemo(
     () =>
       dedupedWorkBlocks
-        .filter((workBlock) => isToday(workBlock.earned_at))
+        .filter((workBlock) => recordDateKey(workBlock.earned_at, workBlock.activity_date) === wakingDay)
         .reduce((total, workBlock) => total + workBlock.duration_minutes, 0),
-    [dedupedWorkBlocks],
+    [dedupedWorkBlocks, wakingDay],
   );
 
-  const exerciseMinutes = useMemo(
-    () => getBehaviorExerciseMinutes(behaviorEvents),
+  const positiveBehaviorRewardMinutes = useMemo(
+    () => getPositiveBehaviorRewardMinutes(behaviorEvents),
     [behaviorEvents],
   );
 
@@ -614,13 +689,16 @@ export default function HomePage() {
   }, [dedupedLedgerEvents, behaviorEvents]);
 
   const rewardDisplay = useMemo(() => {
-    const exerciseVisibleMinutes = Math.min(exerciseMinutes, settlement.positiveMinutes);
+    const positiveBehaviorVisibleMinutes = Math.min(
+      positiveBehaviorRewardMinutes,
+      settlement.positiveMinutes,
+    );
 
     return {
-      exerciseVisibleMinutes,
-      positiveWorkMinutes: settlement.positiveMinutes - exerciseVisibleMinutes,
+      exerciseVisibleMinutes: positiveBehaviorVisibleMinutes,
+      positiveWorkMinutes: settlement.positiveMinutes - positiveBehaviorVisibleMinutes,
     };
-  }, [exerciseMinutes, settlement.positiveMinutes]);
+  }, [positiveBehaviorRewardMinutes, settlement.positiveMinutes]);
 
   const isWeekendBonusActive = useMemo(
     () => isWeekendDate(new Date().toISOString()),
@@ -628,8 +706,8 @@ export default function HomePage() {
   );
 
   const weeklyWeekStart = useMemo(
-    () => shiftWeeks(getWeekStart(new Date()), weekOffset),
-    [weekOffset],
+    () => shiftWeeks(getWeekStart(pacificWallTime(wakingDay)), weekOffset),
+    [weekOffset, wakingDay],
   );
 
   const weekLabel = useMemo(() => {
@@ -644,52 +722,14 @@ export default function HomePage() {
     return formatWeekRangeLabel(weeklyWeekStart);
   }, [weekOffset, weeklyWeekStart]);
 
-  const weeklyWorkBlocks = useMemo(
-    () => dedupedWorkBlocks.filter((workBlock) => isWithinWeek(workBlock.earned_at, weeklyWeekStart)),
-    [dedupedWorkBlocks, weeklyWeekStart],
-  );
-
-  const weeklyRewardWorkMinutes = useMemo(
-    () =>
-      dedupedLedgerEvents
-        .filter(
-          (event) => event.event_type === "work_earned" && isWithinWeek(event.created_at, weeklyWeekStart),
-        )
-        .reduce(
-          (total, event) =>
-            total +
-            rewardMinutesForWorkMinutes(
-              getWorkDurationMinutes(event),
-              isWeekendDate(event.created_at),
-            ),
-          0,
-        ),
-    [dedupedLedgerEvents, weeklyWeekStart],
-  );
-
-  const weeklyWorkMinutes = useMemo(
-    () => weeklyWorkBlocks.reduce((total, workBlock) => total + workBlock.duration_minutes, 0),
-    [weeklyWorkBlocks],
-  );
-
-  const weeklyExerciseMinutes = useMemo(
-    () =>
-      behaviorEvents
-        .filter(
-          (event) => event.behavior_type === "exercise" && isWithinWeek(event.occurred_at, weeklyWeekStart),
-        )
-        .reduce((total, event) => total + (event.duration_minutes ?? 0), 0),
-    [behaviorEvents, weeklyWeekStart],
-  );
-
-  const weeklyPenaltyMinutes = useMemo(
-    () =>
-      behaviorEvents
-        .filter(
-          (event) => event.behavior_type !== "exercise" && isWithinWeek(event.occurred_at, weeklyWeekStart),
-        )
-        .reduce((total, event) => total + (event.penalty_minutes ?? 0), 0),
-    [behaviorEvents, weeklyWeekStart],
+  const weeklyDays = useMemo(
+    () => buildWeeklyEconomyDays({
+      behaviorEvents,
+      ledgerEvents: dedupedLedgerEvents,
+      weekStart: weeklyWeekStart,
+      workBlocks: dedupedWorkBlocks,
+    }),
+    [behaviorEvents, dedupedLedgerEvents, dedupedWorkBlocks, weeklyWeekStart],
   );
 
   const recentActivityItems = useMemo(
@@ -725,6 +765,41 @@ export default function HomePage() {
         return `radial-gradient(circle at top, ${timerPalette.long_break.glow} 0%, ${timerPalette.long_break.glow} 24%, #f6f0e7 54%, #f3ede4 100%)`;
     }
   }, [timerVisualState]);
+
+  useEffect(() => {
+    if (!workspaceUserId || !hasLoadedBehaviorEvents) {
+      return;
+    }
+
+    const checkinDay = shiftDateKey(wakingDay, -1);
+    const outcomes = getHealthyOutcomesForDay(behaviorEvents, -1);
+    const isComplete = Object.values(outcomes).every((outcome) => outcome !== null);
+
+    const timeout = window.setTimeout(() => {
+      if (isComplete) {
+        setIsHealthyCheckinOpen(false);
+        return;
+      }
+
+      if (promptedHealthyCheckinDayRef.current !== checkinDay) {
+        promptedHealthyCheckinDayRef.current = checkinDay;
+        setHealthyCheckinOutcomes(outcomes);
+        setHealthyCheckinError(null);
+        setIsHealthyCheckinOpen(true);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
+  }, [behaviorEvents, hasLoadedBehaviorEvents, wakingDay, workspaceUserId]);
+
+  useEffect(() => {
+    if (!supabase || !workspaceUserId) return;
+    let active = true;
+    void fetchDailyFocusItems(supabase, workspaceUserId, { date: wakingDay })
+      .then((items) => { if (active) setDailyFocusItems(items); })
+      .catch((error: unknown) => { if (active) setDailyFocusNotice(error instanceof Error ? error.message : "Could not refresh today's focus."); });
+    return () => { active = false; };
+  }, [supabase, workspaceUserId, wakingDay]);
 
   useEffect(() => {
     let cancelled = false;
@@ -782,10 +857,12 @@ export default function HomePage() {
 
           if (!cancelled) {
             setBehaviorEvents(behaviorEventRows);
+            setHasLoadedBehaviorEvents(true);
           }
         } catch {
           if (!cancelled) {
             setBehaviorEvents([]);
+            setHasLoadedBehaviorEvents(true);
           }
         }
         setPersistenceState({
@@ -804,6 +881,7 @@ export default function HomePage() {
         setWorkspaceUserEmail(null);
         setLocalLedgerState(INITIAL_STATE);
         setDailyFocusItems([]);
+        setHasLoadedBehaviorEvents(false);
 
         setPersistenceState({
           kind: needsAuth ? "auth_required" : "error",
@@ -827,7 +905,7 @@ export default function HomePage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      const user = session?.user ?? null;
+      const user = session?.user?.email && !session.user.is_anonymous ? session.user : null;
 
       if (!user) {
         handledCompletionKeysRef.current.clear();
@@ -837,6 +915,7 @@ export default function HomePage() {
         setDailyFocusItems([]);
         setDailyFocusNotice(null);
         setBehaviorEvents([]);
+        setHasLoadedBehaviorEvents(false);
         setPersistenceState({
           kind: "auth_required",
           message: AUTH_REQUIRED_MESSAGE,
@@ -871,8 +950,10 @@ export default function HomePage() {
           try {
             const behaviorEventRows = await fetchBehaviorEvents(supabase, user.id);
             setBehaviorEvents(behaviorEventRows);
+            setHasLoadedBehaviorEvents(true);
           } catch {
             setBehaviorEvents([]);
+            setHasLoadedBehaviorEvents(true);
           }
 
           setPersistenceState({
@@ -930,12 +1011,50 @@ export default function HomePage() {
     }
   };
 
-  const getRewardDayOffsetFromTimestamp = (isoTimestamp: string) => {
-    const target = new Date(isoTimestamp);
-    target.setHours(12, 0, 0, 0);
-    const today = getRewardReportDate(0);
-    const millisPerDay = 24 * 60 * 60 * 1000;
-    return Math.round((target.getTime() - today.getTime()) / millisPerDay);
+  const saveHealthyBehaviorOutcomes = async (
+    outcomes: HealthyBehaviorOutcomes,
+    dayOffset: number,
+  ) => {
+    if (!supabase || !workspaceUserId) {
+      throw new Error("Workspace is not connected yet.");
+    }
+
+    const occurredAt = getLocalMiddayTimestampForDayOffset(dayOffset);
+    const behaviorTypes: HealthyBehaviorType[] = ["gallon_water", "waking_routine"];
+
+    try {
+      for (const behaviorType of behaviorTypes) {
+        const succeeded = outcomes[behaviorType];
+
+        if (succeeded === null) {
+          continue;
+        }
+
+        const existing = behaviorEvents.find(
+          (event) =>
+            event.behavior_type === behaviorType &&
+            getDayOffsetFromTimestamp(event.occurred_at, event.activity_date) === dayOffset,
+        );
+        const input = {
+          behaviorType,
+          healthyBehaviorSucceeded: succeeded,
+          note: existing?.note ?? undefined,
+          occurredAt,
+          userId: workspaceUserId,
+        };
+
+        if (existing) {
+          await updateBehaviorEvent(supabase, { ...input, eventId: existing.id });
+        } else {
+          await persistBehaviorEvent(supabase, input);
+        }
+      }
+    } catch (error) {
+      await reloadBehaviorEvents(workspaceUserId);
+      throw error;
+    }
+
+    await reloadBehaviorEvents(workspaceUserId);
   };
 
   const prepareAttributionSelectionState = async ({
@@ -1013,6 +1132,7 @@ export default function HomePage() {
   };
 
   const openManualWorkDialog = async () => {
+    manualSubmissionRef.current = null;
     if (!supabase || !workspaceUserId) {
       setPersistenceState({
         kind: "error",
@@ -1031,6 +1151,7 @@ export default function HomePage() {
       setManualWorkDialogMode({ kind: "create" });
       setManualWorkMinutes("50");
       setManualWorkNote("");
+      setManualWorkDayOffset(0);
       setManualAttributionState(selectionState);
       setIsManualDialogOpen(true);
       setPersistenceState({
@@ -1183,6 +1304,7 @@ export default function HomePage() {
   };
 
   const handleManualWorkAdd = async () => {
+    if (manualWorkSaveInFlightRef.current) return;
     const durationMinutes = Number.parseInt(manualWorkMinutes, 10);
 
     if (!supabase || !workspaceUserId || !manualAttributionState) {
@@ -1211,17 +1333,22 @@ export default function HomePage() {
       return;
     }
 
-    setPersistenceState({
-      kind: "saving",
-      message: "Saving manual work block and attribution...",
-    });
+    manualWorkSaveInFlightRef.current = true;
+    setIsManualWorkSaving(true);
+    setPersistenceState({ kind: "saving", message: "Saving manual work block and attribution..." });
 
     try {
       const selections = buildAttributionSelections(manualAttributionState);
+      const completedAt = getTimestampForDayOffset(
+        manualWorkDayOffset,
+        manualWorkDialogMode.kind === "edit" ? manualWorkDialogMode.ledgerEvent.created_at : undefined,
+        manualWorkDialogMode.kind === "edit" ? manualWorkDialogMode.ledgerEvent.activity_date : undefined,
+      );
 
       if (manualWorkDialogMode.kind === "edit") {
-        await updateManualWorkEntry(supabase, {
-          actorLabel: "Manual work edit",
+        await updateWorkEntry(supabase, {
+          actorLabel: "Work block edit",
+          completedAt,
           durationMinutes,
           ledgerEvent: manualWorkDialogMode.ledgerEvent,
           note: manualWorkNote,
@@ -1230,14 +1357,23 @@ export default function HomePage() {
         });
         await reloadWorkspaceData(workspaceUserId);
       } else {
+        const submission = manualSubmissionRef.current ?? {
+          ids: createManualWorkArtifactIds(), completedAt, attributionIds: {},
+        };
+        submission.completedAt = getTimestampForDayOffset(manualWorkDayOffset, submission.completedAt, wakingDateKey(submission.completedAt));
+        manualSubmissionRef.current = submission;
+        const attributionIds = selections.map((selection) =>
+          submission.attributionIds[selection.taskId] ??= crypto.randomUUID());
         const artifacts = await persistManualWorkBlock(supabase, {
-          completedAt: new Date().toISOString(),
+          artifactIds: submission.ids,
+          completedAt: submission.completedAt,
           durationMinutes,
           note: manualWorkNote,
           userId: workspaceUserId,
         });
 
         await persistWorkBlockAttributions(supabase, {
+          attributionIds,
           durationMinutes,
           ledgerEvent: artifacts.ledgerEvent,
           note: manualWorkNote,
@@ -1250,8 +1386,10 @@ export default function HomePage() {
       }
 
       await reloadDailyFocusItems(workspaceUserId);
+      manualSubmissionRef.current = null;
       setManualWorkNote("");
       setManualWorkMinutes("50");
+      setManualWorkDayOffset(0);
       const createdTasksThisTurn = manualAttributionState.createdTasksThisTurn;
       setManualAttributionState(null);
       setManualWorkDialogMode({ kind: "create" });
@@ -1259,7 +1397,7 @@ export default function HomePage() {
       setPersistenceState({
         kind: "saved",
         message: manualWorkDialogMode.kind === "edit"
-          ? "Manual work block updated"
+          ? "Work block updated"
           : "Manual work block saved and attributed",
       });
       if (createdTasksThisTurn.length > 0) {
@@ -1277,6 +1415,9 @@ export default function HomePage() {
         kind: "error",
         message: error instanceof Error ? error.message : "Could not save the manual work block.",
       });
+    } finally {
+      manualWorkSaveInFlightRef.current = false;
+      setIsManualWorkSaving(false);
     }
   };
 
@@ -1313,7 +1454,7 @@ export default function HomePage() {
 
     try {
       const rewardName = `${formatDurationLabel(redeemHours, redeemMinutePortion)} reward block`;
-      const redeemedAt = getRewardReportDate(rewardDayOffset).toISOString();
+      const redeemedAt = getDayOffsetDate(rewardDayOffset).toISOString();
 
       if (rewardDialogMode.kind === "edit") {
         await updateRewardSpendEntry(supabase, {
@@ -1357,17 +1498,49 @@ export default function HomePage() {
   };
 
   const handleSaveBehaviorEvent = async () => {
-    if (!supabase || !workspaceUserId) {
+    if (!supabase || !workspaceUserId || behaviorSaveInFlightRef.current) {
       return;
     }
 
     let durationMinutes: number | null = null;
-    let occurredAt: string | undefined;
+    const occurredAt = getLocalMiddayTimestampForDayOffset(behaviorDialogState.dayOffset);
+    setBehaviorDialogError(null);
+
+    if (isHealthyBehaviorType(behaviorDialogState.behaviorType)) {
+      if (Object.values(behaviorDialogState.healthyOutcomes).some((outcome) => outcome === null)) {
+        setBehaviorDialogError("Choose Yes or No for both healthy behaviors.");
+        return;
+      }
+
+      behaviorSaveInFlightRef.current = true;
+      setIsBehaviorSaving(true);
+
+      try {
+        await saveHealthyBehaviorOutcomes(
+          behaviorDialogState.healthyOutcomes,
+          behaviorDialogState.dayOffset,
+        );
+        setIsBehaviorDialogOpen(false);
+        setBehaviorDialogState(INITIAL_BEHAVIOR_DIALOG_STATE);
+        setBehaviorDialogMode({ kind: "create" });
+        setPersistenceState({ kind: "saved", message: "Healthy behaviors saved" });
+      } catch (error) {
+        setBehaviorDialogError(
+          error instanceof Error ? error.message : "Could not save healthy behaviors.",
+        );
+      } finally {
+        behaviorSaveInFlightRef.current = false;
+        setIsBehaviorSaving(false);
+      }
+
+      return;
+    }
 
     if (behaviorDialogState.behaviorType === "screen_time") {
       const screenMinutes = Number.parseInt(behaviorDialogState.screenTimeMinutes, 10);
 
       if (!Number.isFinite(screenMinutes) || screenMinutes <= 0) {
+        setBehaviorDialogError("Enter your total screen time for the day in minutes.");
         setPersistenceState({
           kind: "error",
           message: "Enter your total screen time for the day in minutes.",
@@ -1376,14 +1549,11 @@ export default function HomePage() {
       }
 
       durationMinutes = screenMinutes;
-
-      if (behaviorDialogState.screenTimeDate) {
-        occurredAt = new Date(`${behaviorDialogState.screenTimeDate}T12:00:00`).toISOString();
-      }
     } else if (behaviorDialogState.behaviorType === "exercise") {
       const workoutMinutes = Number.parseInt(behaviorDialogState.exerciseMinutes, 10);
 
       if (!Number.isFinite(workoutMinutes) || workoutMinutes <= 0) {
+        setBehaviorDialogError("Enter your workout length in minutes.");
         setPersistenceState({
           kind: "error",
           message: "Enter your workout length in minutes.",
@@ -1394,6 +1564,8 @@ export default function HomePage() {
       durationMinutes = workoutMinutes;
     }
 
+    behaviorSaveInFlightRef.current = true;
+    setIsBehaviorSaving(true);
     setPersistenceState({
       kind: "saving",
       message: "Saving behavior entry...",
@@ -1423,15 +1595,21 @@ export default function HomePage() {
       setIsBehaviorDialogOpen(false);
       setBehaviorDialogState(INITIAL_BEHAVIOR_DIALOG_STATE);
       setBehaviorDialogMode({ kind: "create" });
+      setBehaviorDialogError(null);
       setPersistenceState({
         kind: "saved",
         message: behaviorDialogMode.kind === "edit" ? "Behavior entry updated" : "Behavior entry saved",
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save the behavior entry.";
+      setBehaviorDialogError(message);
       setPersistenceState({
         kind: "error",
-        message: error instanceof Error ? error.message : "Could not save the behavior entry.",
+        message,
       });
+    } finally {
+      behaviorSaveInFlightRef.current = false;
+      setIsBehaviorSaving(false);
     }
   };
 
@@ -1439,17 +1617,49 @@ export default function HomePage() {
     setBehaviorDialogMode({ kind: "edit", event });
     setBehaviorDialogState({
       behaviorType: event.behavior_type,
+      dayOffset: getDayOffsetFromTimestamp(event.occurred_at, event.activity_date),
       screenTimeMinutes:
         event.behavior_type === "screen_time" ? String(event.duration_minutes ?? "") : "",
-      screenTimeDate: event.behavior_type === "screen_time" ? toDateInputValue(event.occurred_at) : "",
       exerciseMinutes: event.behavior_type === "exercise" ? String(event.duration_minutes ?? "") : "",
       note: event.note ?? "",
+      healthyOutcomes: isHealthyBehaviorType(event.behavior_type)
+        ? getHealthyOutcomesForDay(
+            behaviorEvents,
+            getDayOffsetFromTimestamp(event.occurred_at, event.activity_date),
+          )
+        : EMPTY_HEALTHY_OUTCOMES,
     });
+    setBehaviorDialogError(null);
     setIsBehaviorDialogOpen(true);
   };
 
   const handleRequestDeleteBehavior = (event: BehaviorEvent) => {
     setBehaviorDeleteTarget(event);
+  };
+
+  const handleSaveHealthyCheckin = async () => {
+    if (Object.values(healthyCheckinOutcomes).some((outcome) => outcome === null)) {
+      setHealthyCheckinError("Choose Yes or No for both healthy behaviors.");
+      return;
+    }
+
+    setIsHealthyCheckinSaving(true);
+    setHealthyCheckinError(null);
+
+    try {
+      await saveHealthyBehaviorOutcomes(healthyCheckinOutcomes, -1);
+      setIsHealthyCheckinOpen(false);
+      setPersistenceState({
+        kind: "saved",
+        message: "Yesterday's healthy behaviors saved",
+      });
+    } catch (error) {
+      setHealthyCheckinError(
+        error instanceof Error ? error.message : "Could not save healthy behaviors.",
+      );
+    } finally {
+      setIsHealthyCheckinSaving(false);
+    }
   };
 
   const handleConfirmDeleteBehavior = async () => {
@@ -1658,7 +1868,7 @@ export default function HomePage() {
       throw new Error("Workspace is not connected yet.");
     }
 
-    return fetchTasks(supabase, workspaceUserId, { includeArchived: false });
+    return fetchTaskLibrary(supabase, workspaceUserId);
   };
 
   const applyCreatedTaskToAttribution = (created: Task) => {
@@ -1890,11 +2100,14 @@ export default function HomePage() {
     }
 
     try {
-      if (event.event_type === "work_earned" && event.source === "manual_entry") {
-        const defaults = getManualWorkDefaultsFromLedgerEvent(event);
+      if (
+        event.event_type === "work_earned" &&
+        (event.source === "manual_entry" || event.source === "pomodoro_timer")
+      ) {
+        const defaults = getWorkEntryDefaultsFromLedgerEvent(event);
 
         if (!defaults.workBlockId || !defaults.durationMinutes) {
-          throw new Error("This manual work event is missing its linked work block details.");
+          throw new Error("This work event is missing its linked work block details.");
         }
 
         const selections = await fetchAttributionSelectionsForWorkBlock(supabase, {
@@ -1915,10 +2128,11 @@ export default function HomePage() {
         });
         setManualWorkMinutes(String(defaults.durationMinutes));
         setManualWorkNote(defaults.note ?? "");
+        setManualWorkDayOffset(getDayOffsetFromTimestamp(event.created_at, event.activity_date));
         setIsManualDialogOpen(true);
         setPersistenceState({
           kind: "ready",
-          message: "Editing manual work block",
+          message: "Editing work block",
         });
         return;
       }
@@ -1935,7 +2149,7 @@ export default function HomePage() {
         });
         setRewardHours(String(rewardHoursValue));
         setRewardMinutes(String(rewardMinuteValue));
-        setRewardDayOffset(getRewardDayOffsetFromTimestamp(event.created_at));
+        setRewardDayOffset(getDayOffsetFromTimestamp(event.created_at, event.activity_date));
         setRewardNote(defaults.notes);
         setIsRewardDialogOpen(true);
         setPersistenceState({
@@ -2014,6 +2228,7 @@ export default function HomePage() {
   };
 
   const handleSaveWorkAttribution = async () => {
+    if (attributionSaveInFlightRef.current) return;
     if (!supabase || !workspaceUserId || !attributionDialogState) {
       return;
     }
@@ -2028,15 +2243,19 @@ export default function HomePage() {
       return;
     }
 
-    setPersistenceState({
-      kind: "saving",
-      message: "Saving work attribution...",
-    });
+    attributionSaveInFlightRef.current = true;
+    setIsAttributionSaving(true);
+    setPersistenceState({ kind: "saving", message: "Saving work attribution..." });
 
     try {
       const selections = buildAttributionSelections(attributionDialogState);
+      if (attributionSubmissionRef.current?.workBlockId !== attributionDialogState.workBlock.id)
+        attributionSubmissionRef.current = { workBlockId: attributionDialogState.workBlock.id, ids: {} };
+      const ids = attributionSubmissionRef.current.ids;
+      const attributionIds = selections.map((selection) => ids[selection.taskId] ??= crypto.randomUUID());
 
       const result = await persistWorkBlockAttributions(supabase, {
+        attributionIds,
         durationMinutes: attributionDialogState.workBlock.duration_minutes,
         ledgerEvent: attributionDialogState.ledgerEvent,
         selections,
@@ -2052,6 +2271,7 @@ export default function HomePage() {
       }));
       await reloadDailyFocusItems(workspaceUserId);
       const createdTasksThisTurn = attributionDialogState.createdTasksThisTurn;
+      attributionSubmissionRef.current = null;
       setAttributionDialogState(null);
       setPersistenceState({
         kind: "saved",
@@ -2072,12 +2292,15 @@ export default function HomePage() {
         kind: "error",
         message: error instanceof Error ? error.message : "Could not save the work attribution.",
       });
+    } finally {
+      attributionSaveInFlightRef.current = false;
+      setIsAttributionSaving(false);
     }
   };
 
   return (
     <main className="min-h-screen transition-colors duration-500" style={{ background: pageToneClass }}>
-      <WorkspaceHeader email={workspaceUserEmail} status={persistenceState.message} onSignOut={() => void handleSignOut()} onReset={() => setIsResetDialogOpen(true)} unfinishedTimer={!["idle", "complete"].includes(timerVisualState.status)} />
+      <WorkspaceHeader email={workspaceUserEmail} status={persistenceState.message} onSignOut={() => void handleSignOut()} onReset={() => setIsResetDialogOpen(true)} />
       <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-8">
         <h1 className="sr-only">Work tracking</h1>
 
@@ -2100,6 +2323,7 @@ export default function HomePage() {
               onComplete={handleTimerComplete}
               onEndSession={handleEndSession}
               onStateChange={setTimerVisualState}
+              userId={workspaceUserId}
             />
 
             <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-5 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
@@ -2171,7 +2395,8 @@ export default function HomePage() {
         </section>
 
         <section className="grid gap-6 pt-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_22rem] lg:items-start">
-          <section className="lg:col-span-2 rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
+          <div className="space-y-6 lg:col-span-2">
+          <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)]">
             <div className="grid gap-8 md:grid-cols-2 md:gap-0">
               <OverviewModule
                 action={
@@ -2296,19 +2521,25 @@ export default function HomePage() {
                 </div>
               }
               body={
-                <WeeklyOverview
-                  exerciseMinutes={weeklyExerciseMinutes}
-                  penaltyMinutes={weeklyPenaltyMinutes}
-                  rewardWorkMinutes={weeklyRewardWorkMinutes}
-                  workMinutes={weeklyWorkMinutes}
-                />
+                <WeeklyOverview days={weeklyDays} />
               }
               title="Weekly overview"
             />
           </section>
+          </div>
 
           <section className="rounded-[0.7rem] border border-slate-300/70 bg-[#f6f4ee]/92 p-6 shadow-[0_12px_28px_rgba(15,23,42,0.08)] lg:col-start-3">
             <OverviewModule
+              action={
+                <Link
+                  className="text-sm text-slate-500 transition hover:text-slate-900"
+                  href="/history"
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Full history ↗
+                </Link>
+              }
               body={
                 <LedgerEventList
                   emptyMessage="Finish a work timer to create your first saved ledger event."
@@ -2330,17 +2561,20 @@ export default function HomePage() {
 
       <Dialog
         onClose={() => {
+          if (manualWorkSaveInFlightRef.current) return;
+          manualSubmissionRef.current = null;
           setIsManualDialogOpen(false);
           setManualAttributionState(null);
           setManualWorkDialogMode({ kind: "create" });
           setManualWorkMinutes("50");
           setManualWorkNote("");
+          setManualWorkDayOffset(0);
         }}
         open={isManualDialogOpen}
         title={manualWorkDialogMode.kind === "edit" ? "Edit work block" : "Add missed work"}
       >
         {manualAttributionState ? (
-          <div className="space-y-5">
+          <fieldset disabled={isManualWorkSaving} className="space-y-5">
             <div className="grid gap-3 sm:grid-cols-2">
               <ActionField
                 label="Minutes"
@@ -2358,6 +2592,35 @@ export default function HomePage() {
               />
             </div>
 
+            <div className="space-y-2">
+              <span className="text-sm text-slate-600">Day of work block</span>
+              <div className="flex items-center justify-between rounded-2xl border border-slate-300/80 bg-white/80 px-4 py-3">
+                <Button
+                  className="text-slate-500"
+                  onClick={() => setManualWorkDayOffset((current) => current - 1)}
+                  size="inline"
+                  variant="text"
+                >
+                  ←
+                </Button>
+                <span className="text-sm font-medium text-slate-900">
+                  {formatDayOffsetDate(manualWorkDayOffset)}
+                </span>
+                {manualWorkDayOffset < 0 ? (
+                  <Button
+                    className="text-slate-500"
+                    onClick={() => setManualWorkDayOffset((current) => Math.min(current + 1, 0))}
+                    size="inline"
+                    variant="text"
+                  >
+                    →
+                  </Button>
+                ) : (
+                  <span className="w-4" />
+                )}
+              </div>
+            </div>
+
             <AttributionFields
               availableTasks={manualAttributionState.availableTasks}
               choresTask={manualAttributionState.choresTask}
@@ -2370,11 +2633,41 @@ export default function HomePage() {
               selectedTaskIds={manualAttributionState.selectedTaskIds}
             />
 
-            <Button className="w-full" onClick={handleManualWorkAdd} variant="secondary">
-              {manualWorkDialogMode.kind === "edit" ? "Save changes" : "Save work block"}
+            <Button disabled={isManualWorkSaving} className="w-full" onClick={handleManualWorkAdd} variant="secondary">
+              {isManualWorkSaving ? "Saving…" : manualWorkDialogMode.kind === "edit" ? "Save changes" : "Save work block"}
             </Button>
-          </div>
+          </fieldset>
         ) : null}
+      </Dialog>
+
+      <Dialog
+        onClose={() => setIsHealthyCheckinOpen(false)}
+        open={isHealthyCheckinOpen}
+        title={`Yesterday (${formatCheckinDate(-1)}), did you accomplish…`}
+      >
+        <div className="space-y-5">
+          <HealthyBehaviorCheckin
+            disabled={isHealthyCheckinSaving}
+            onChange={(type, value) =>
+              setHealthyCheckinOutcomes((current) => ({ ...current, [type]: value }))
+            }
+            outcomes={healthyCheckinOutcomes}
+          />
+          <p className="text-xs leading-5 text-slate-500">
+            Yes adds 30 reward minutes. No subtracts 30 reward minutes.
+          </p>
+          {healthyCheckinError ? (
+            <p className="text-sm text-rose-700">{healthyCheckinError}</p>
+          ) : null}
+          <Button
+            className="w-full"
+            disabled={isHealthyCheckinSaving}
+            onClick={handleSaveHealthyCheckin}
+            variant="secondary"
+          >
+            {isHealthyCheckinSaving ? "Saving…" : "Save daily check-in"}
+          </Button>
+        </div>
       </Dialog>
 
       <Dialog
@@ -2426,7 +2719,7 @@ export default function HomePage() {
                 ←
               </Button>
               <span className="text-sm font-medium text-slate-900">
-                {formatRewardReportDate(rewardDayOffset)}
+                {formatDayOffsetDate(rewardDayOffset)}
               </span>
               {rewardDayOffset < 0 ? (
                 <Button
@@ -2464,7 +2757,7 @@ export default function HomePage() {
         title="Attribute work block"
       >
         {attributionDialogState ? (
-          <div className="space-y-5">
+          <fieldset disabled={isAttributionSaving} className="space-y-5">
             <p className="text-sm leading-6 text-slate-600">
               Split this completed work block across the tasks it supported.
             </p>
@@ -2481,11 +2774,11 @@ export default function HomePage() {
             />
 
             <div className="flex justify-end">
-              <Button onClick={handleSaveWorkAttribution} variant="secondary">
-                Save attribution
+              <Button disabled={isAttributionSaving} onClick={handleSaveWorkAttribution} variant="secondary">
+                {isAttributionSaving ? "Saving…" : "Save attribution"}
               </Button>
             </div>
-          </div>
+          </fieldset>
         ) : null}
       </Dialog>
 
@@ -2632,29 +2925,58 @@ export default function HomePage() {
           setIsBehaviorDialogOpen(false);
           setBehaviorDialogState(INITIAL_BEHAVIOR_DIALOG_STATE);
           setBehaviorDialogMode({ kind: "create" });
+          setBehaviorDialogError(null);
         }}
         open={isBehaviorDialogOpen}
         title={behaviorDialogMode.kind === "edit" ? "Edit behavior entry" : "Behavior tracking"}
       >
         <div className="space-y-5">
-          <div className="grid gap-2 sm:grid-cols-3">
-            {(["indulgence", "screen_time", "exercise"] as BehaviorType[]).map((type) => {
-              const selected = behaviorDialogState.behaviorType === type;
+          <div className="grid gap-2 sm:grid-cols-4">
+            {BEHAVIOR_TABS.map((tab) => {
+              const selected = tab.value === "healthy_behaviors"
+                ? isHealthyBehaviorType(behaviorDialogState.behaviorType)
+                : behaviorDialogState.behaviorType === tab.value;
 
               return (
                 <Button
-                  key={type}
+                  key={tab.value}
                   aria-pressed={selected}
                   onClick={() =>
-                    setBehaviorDialogState((current) => ({ ...current, behaviorType: type }))
+                    setBehaviorDialogState((current) => {
+                      const behaviorType = tab.value === "healthy_behaviors"
+                        ? "waking_routine"
+                        : tab.value;
+                      return {
+                        ...current,
+                        behaviorType,
+                        healthyOutcomes: isHealthyBehaviorType(behaviorType)
+                          ? getHealthyOutcomesForDay(behaviorEvents, current.dayOffset)
+                          : current.healthyOutcomes,
+                      };
+                    })
                   }
                   variant={selected ? "primary" : "secondary"}
                 >
-                  {getBehaviorTypeLabel(type)}
+                  {tab.label}
                 </Button>
               );
             })}
           </div>
+
+          <DayOffsetSelector
+            disabled={isBehaviorSaving}
+            label="Day of behavior"
+            onChange={(dayOffset) =>
+              setBehaviorDialogState((current) => ({
+                ...current,
+                dayOffset,
+                healthyOutcomes: isHealthyBehaviorType(current.behaviorType)
+                  ? getHealthyOutcomesForDay(behaviorEvents, dayOffset)
+                  : current.healthyOutcomes,
+              }))
+            }
+            value={behaviorDialogState.dayOffset}
+          />
 
           {behaviorDialogState.behaviorType === "indulgence" ? (
             <div className="rounded-[0.8rem] border border-slate-200/80 bg-white/70 px-4 py-3">
@@ -2669,14 +2991,6 @@ export default function HomePage() {
           {behaviorDialogState.behaviorType === "screen_time" ? (
             <div className="space-y-3">
               <ActionField
-                label="Day"
-                onChange={(event) =>
-                  setBehaviorDialogState((current) => ({ ...current, screenTimeDate: event.target.value }))
-                }
-                type="date"
-                value={behaviorDialogState.screenTimeDate}
-              />
-              <ActionField
                 label="Total screen time (minutes)"
                 inputMode="numeric"
                 min="0"
@@ -2689,7 +3003,10 @@ export default function HomePage() {
               {behaviorDialogState.screenTimeMinutes ? (
                 <p className="text-sm text-slate-500">
                   Penalty:{" "}
-                  {computeScreenTimePenalty(Number.parseInt(behaviorDialogState.screenTimeMinutes, 10) || 0)}{" "}
+                  {computeScreenTimePenalty(
+                    Number.parseInt(behaviorDialogState.screenTimeMinutes, 10) || 0,
+                    getLocalMiddayTimestampForDayOffset(behaviorDialogState.dayOffset),
+                  )}{" "}
                   minutes
                 </p>
               ) : null}
@@ -2709,17 +3026,56 @@ export default function HomePage() {
             />
           ) : null}
 
-          <ActionField
-            label="Note"
-            onChange={(event) =>
-              setBehaviorDialogState((current) => ({ ...current, note: event.target.value }))
-            }
-            placeholder="Optional note"
-            value={behaviorDialogState.note}
-          />
+          {isHealthyBehaviorType(behaviorDialogState.behaviorType) ? (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-slate-800">
+                {behaviorDialogState.dayOffset === 0 ? "Today" : "Selected day"}{" "}
+                ({formatCheckinDate(behaviorDialogState.dayOffset)}), did you accomplish…
+              </p>
+              <HealthyBehaviorCheckin
+                disabled={isBehaviorSaving}
+                onChange={(type, value) =>
+                  setBehaviorDialogState((current) => ({
+                    ...current,
+                    healthyOutcomes: { ...current.healthyOutcomes, [type]: value },
+                  }))
+                }
+                outcomes={behaviorDialogState.healthyOutcomes}
+              />
+              <p className="text-xs leading-5 text-slate-500">
+                Yes adds 30 reward minutes. No subtracts 30 reward minutes.
+              </p>
+            </div>
+          ) : null}
 
-          <Button className="w-full" onClick={handleSaveBehaviorEvent} variant="secondary">
-            {behaviorDialogMode.kind === "edit" ? "Save changes" : "Save behavior entry"}
+          {!isHealthyBehaviorType(behaviorDialogState.behaviorType) ? (
+            <ActionField
+              label="Note"
+              onChange={(event) =>
+                setBehaviorDialogState((current) => ({ ...current, note: event.target.value }))
+              }
+              placeholder="Optional note"
+              value={behaviorDialogState.note}
+            />
+          ) : null}
+
+          {behaviorDialogError ? (
+            <p className="text-sm text-rose-700">{behaviorDialogError}</p>
+          ) : null}
+
+          <Button
+            className="w-full"
+            disabled={isBehaviorSaving}
+            onClick={handleSaveBehaviorEvent}
+            variant="secondary"
+          >
+            {isBehaviorSaving
+              ? "Saving..."
+              : behaviorDialogMode.kind === "edit"
+                ? "Save changes"
+                : isHealthyBehaviorType(behaviorDialogState.behaviorType)
+                  ? "Save daily check-in"
+                  : "Save behavior entry"}
           </Button>
         </div>
       </Dialog>

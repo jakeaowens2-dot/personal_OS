@@ -5,7 +5,7 @@ export async function loadAssistantContext(): Promise<{ context: Record<string, 
   const client = createSupabaseBrowserClient();
   if (!client) return { context: null, label: "Working from our conversation" };
   const { data, error } = await client.auth.getUser();
-  if (error || !data.user) return { context: null, label: "Sign in on Home to include your tasks" };
+  if (error || !data.user?.email || data.user.is_anonymous) return { context: null, label: "Sign in on Home to include your tasks" };
   const userId = data.user.id;
   const [planning, tasks] = await Promise.allSettled([
     buildPlanningContextPacket(client, userId),

@@ -277,6 +277,12 @@ function ProposalCard({ proposal: p, onResolve, busy }: {
         <section className={styles.proposalStatus} aria-label="Task status summary">
           <h3>Status</h3>
           <p className={styles.proposalDescription}>{proposalStatusSummary(p)}</p>
+          {p.planned_focus_date && p.planned_focus_position ? (
+            <p className={styles.muted}>
+              Morning plan · position {p.planned_focus_position} on {p.planned_focus_date}
+              {pending ? " if accepted" : p.status === "applied" ? " · added to focus when accepted" : " · not scheduled"}
+            </p>
+          ) : null}
           {p.patch_json.description !== undefined && p.patch_json.description !== proposalStatusSummary(p) && pending && <p className={styles.muted}>Description: {p.patch_json.description || "Clear description"}</p>}
         </section>
         <details className={styles.proposalHistory}>

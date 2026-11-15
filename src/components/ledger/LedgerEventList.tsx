@@ -1,12 +1,10 @@
 import { Badge } from "@/components/ui/Badge";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
-import { getBehaviorTypeLabel } from "@/lib/behaviors";
+import { getBehaviorTypeLabel, isHealthyBehaviorSuccess, isHealthyBehaviorType } from "@/lib/behaviors";
+import { HEALTHY_BEHAVIOR_REWARD_MINUTES } from "@/lib/economy";
+import type { ActivityItem } from "@/lib/history";
 import { exercisePalette, penaltyPalette, rewardPalette, timerPalette } from "@/lib/timerPalette";
 import type { BehaviorEvent, LedgerEvent } from "@/lib/types";
-
-export type ActivityItem =
-  | { kind: "ledger"; event: LedgerEvent }
-  | { kind: "behavior"; event: BehaviorEvent };
 
 type LedgerEventListProps = {
   emptyMessage: string;
@@ -48,6 +46,10 @@ function getEventDisplayType(event: LedgerEvent) {
 }
 
 function getEventTitle(event: LedgerEvent) {
+  if (event.event_type === "correction") {
+    return typeof event.metadata?.reason === "string" ? event.metadata.reason : "Balance correction";
+  }
+
   if (event.event_type === "reward_spent") {
     const rewardName =
       typeof event.metadata?.reward_name === "string" ? event.metadata.reward_name : null;
@@ -76,6 +78,14 @@ function getEventDetail(event: LedgerEvent) {
 }
 
 function getDeltaLabel(event: LedgerEvent) {
+  if (event.event_type === "correction" || event.event_type === "bonus") {
+    const correctionMinutes = event.metadata?.reward_minutes_delta;
+    if (typeof correctionMinutes === "number" && Number.isFinite(correctionMinutes)) {
+      const direction = correctionMinutes >= 0 ? "+" : "-";
+      return `${direction}${Math.abs(correctionMinutes)} min reward`;
+    }
+  }
+
   if (event.delta_work_blocks !== 0) {
     const count = Math.abs(event.delta_work_blocks);
     const direction = event.delta_work_blocks > 0 ? "+" : "-";
@@ -108,6 +118,10 @@ function getBehaviorDeltaLabel(event: BehaviorEvent) {
     return `+${Math.ceil(event.duration_minutes ?? 0)} min reward`;
   }
 
+  if (isHealthyBehaviorType(event.behavior_type)) {
+    return `${isHealthyBehaviorSuccess(event) ? "+" : "-"}${HEALTHY_BEHAVIOR_REWARD_MINUTES} min reward`;
+  }
+
   return `-${Math.ceil(event.penalty_minutes ?? 0)} min reward`;
 }
 
@@ -117,7 +131,9 @@ function getBehaviorDetail(event: BehaviorEvent) {
 }
 
 function getBehaviorSwatchColor(event: BehaviorEvent) {
-  return event.behavior_type === "exercise" ? exercisePalette.progress : penaltyPalette.progress;
+  return event.behavior_type === "exercise" || isHealthyBehaviorSuccess(event)
+    ? exercisePalette.progress
+    : penaltyPalette.progress;
 }
 
 export function LedgerEventList({

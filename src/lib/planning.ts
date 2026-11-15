@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { calendarDateKey, dateKeyOffset, wakingDateKey, shiftDateKey } from "./activity-day";
 import type { DailyFocusItemWithTask } from "@/lib/types";
 import { fetchDailyFocusItems, fetchTasks } from "@/lib/tasks";
 
@@ -8,24 +9,15 @@ import { fetchDailyFocusItems, fetchTasks } from "@/lib/tasks";
 // ---------------------------------------------------------------------------
 
 function getTodayDateKey() {
-  const today = new Date();
-  const offsetDate = new Date(today.getTime() - today.getTimezoneOffset() * 60 * 1000);
-  return offsetDate.toISOString().slice(0, 10);
+  return wakingDateKey();
 }
 
 function getYesterdayDateKey() {
-  const today = new Date();
-  today.setDate(today.getDate() - 1);
-  const offsetDate = new Date(today.getTime() - today.getTimezoneOffset() * 60 * 1000);
-  return offsetDate.toISOString().slice(0, 10);
+  return shiftDateKey(wakingDateKey(), -1);
 }
 
 function daysFromNow(isoDate: string) {
-  const target = new Date(isoDate);
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  target.setHours(0, 0, 0, 0);
-  return Math.floor((target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  return dateKeyOffset(calendarDateKey(isoDate));
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ export type TimerSession = {
 };
 
 export type WorkBlock = {
+  activity_date?: string | null;
   id: string;
   user_id: string;
   timer_session_id: string;
@@ -31,6 +32,7 @@ export type WorkBlock = {
 export type LedgerEventType = "work_earned" | "reward_spent" | "correction" | "bonus";
 
 export type LedgerEvent = {
+  activity_date?: string | null;
   id: string;
   user_id: string;
   event_type: LedgerEventType;
@@ -143,6 +145,18 @@ export type ProjectTrackerItem = {
   updated_at: string;
 };
 
+export type PaperReadingEntry = {
+  id: string;
+  user_id: string;
+  title: string;
+  citation: string | null;
+  source_url: string | null;
+  completed_on: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type TaskRevisionActionType =
   | "created"
   | "updated"
@@ -206,15 +220,19 @@ export type WorkBlockAttribution = {
   deletion_reason?: string | null;
 };
 
-export type BehaviorType = "indulgence" | "screen_time" | "exercise";
+export type HealthyBehaviorType = "waking_routine" | "gallon_water";
+
+export type BehaviorType = "indulgence" | "screen_time" | "exercise" | HealthyBehaviorType;
 
 export type BehaviorEvent = {
+  activity_date?: string | null;
   id: string;
   user_id: string;
   behavior_type: BehaviorType;
   occurred_at: string;
   duration_minutes: number | null;
   penalty_minutes: number | null;
+  healthy_behavior_succeeded: boolean | null;
   note: string | null;
   deleted_at?: string | null;
   deleted_by_actor_label?: string | null;

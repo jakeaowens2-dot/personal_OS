@@ -14,6 +14,7 @@ import { MAX_MESSAGE_LENGTH } from "@/lib/assistant/contracts";
 import {
   localDate,
   type AssistantState,
+  type PlanningTurn,
   type PlanningTurnInput,
 } from "@/lib/assistant/state";
 import {
@@ -21,6 +22,7 @@ import {
   ProposalList,
   ReviewPanel,
 } from "@/components/assistant/WorkingState";
+import { MorningOpening } from "@/components/assistant/MorningOpening";
 
 const PENDING_KEY = "personal-os.assistant.pending-turn.v2";
 const LEGACY_KEY = "personal-os.assistant.conversation.v1";
@@ -56,18 +58,20 @@ export default function AssistantPage() {
   const [draftReviewDate, setDraftReviewDate] = useState<string | null>(null);
   const [draftSource, setDraftSource] = useState<string | null>(null);
   const [connection, setConnection] = useState<Connection | null>(null);
-  const [observedAt, setObservedAt] = useState(0);
   const [checking, setChecking] = useState(true);
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [carryoverOpen, setCarryoverOpen] = useState(false);
   const [source, setSource] = useState<{ title: string; text: string } | null>(
     null,
   );
   const [pending, setPending] = useState<PlanningTurnInput | null>(null);
+  const [steeringTurnId, setSteeringTurnId] = useState<string | null>(null);
   const [legacy, setLegacy] = useState(false);
   const inFlight = useRef(false);
+  const backgroundInFlight = useRef(false);
   const applyingRef = useRef(false);
   const abort = useRef<AbortController | null>(null);
   const composer = useRef<HTMLTextAreaElement>(null);
@@ -80,7 +84,6 @@ export default function AssistantPage() {
     ) ?? [];
   const closingReviews =
     state?.reviews.filter((r) => r.local_date === date && date === today) ?? [];
-  const pendingOwner = useRef<string | null>(null);
   const presentationSent = useRef(new Set<string>());
   const catchingUp = useRef(new Set<string>());
 
@@ -96,25 +99,42 @@ export default function AssistantPage() {
         setState(null);
         setConnection(null);
         setPending(null);
-        pendingOwner.current = null;
       }
       throw new Error(result.error || "Could not load assistant state.");
     }
-    if (pendingOwner.current !== result.state.userId) {
-      pendingOwner.current = result.state.userId;
-      try {
-        const saved = sessionStorage.getItem(
-          `${PENDING_KEY}:${result.state.userId}`,
-        );
-        setPending(saved ? JSON.parse(saved) : null);
-      } catch {
+    try {
+      const pendingKey = `${PENDING_KEY}:${result.state.userId}`;
+      const saved = sessionStorage.getItem(pendingKey);
+      const savedInput = saved
+        ? (JSON.parse(saved) as PlanningTurnInput)
+        : null;
+      const savedTurn = savedInput
+        ? result.state.turns.find(
+            (turn: PlanningTurn) => turn.id === savedInput.id,
+          )
+        : null;
+      const hasSteeringSuccessor = savedInput
+        ? result.state.turns.some(
+            (turn: PlanningTurn) =>
+              turn.input_json.steeringForTurnId === savedInput.id,
+          )
+        : false;
+      if (
+        savedInput?.kind === "catch_up" ||
+        savedTurn?.status === "completed" ||
+        hasSteeringSuccessor
+      ) {
+        sessionStorage.removeItem(pendingKey);
         setPending(null);
+      } else {
+        setPending(savedInput);
       }
+    } catch {
+      setPending(null);
     }
     try {
       setLegacy(Boolean(localStorage.getItem(LEGACY_KEY)));
     } catch {}
-    setObservedAt(Date.now());
     setState(result.state);
     setDate(result.state.date);
     if (result.connection) setConnection(result.connection);
@@ -136,7 +156,6 @@ export default function AssistantPage() {
       });
     return () => {
       active = false;
-      abort.current?.abort();
     };
   }, [refresh]);
   useEffect(() => {
@@ -176,21 +195,27 @@ export default function AssistantPage() {
 
   async function run(input: PlanningTurnInput) {
     if (inFlight.current || !state) return;
+    const background = input.kind === "catch_up";
+    if (background && backgroundInFlight.current) return;
     const pendingKey = `${PENDING_KEY}:${state.userId}`;
-    inFlight.current = true;
-    setBusy(true);
-    setError(null);
-    setPending(input);
-    setDate(localDate());
-    try {
-      sessionStorage.setItem(pendingKey, JSON.stringify(input));
-    } catch {
-      setError(
-        "This browser cannot keep a retry key. The server will still preserve accepted messages.",
-      );
+    if (background) {
+      backgroundInFlight.current = true;
+    } else {
+      inFlight.current = true;
+      setBusy(true);
+      setError(null);
+      setPending(input);
+      setDate(localDate());
+      try {
+        sessionStorage.setItem(pendingKey, JSON.stringify(input));
+      } catch {
+        setError(
+          "This browser cannot keep a retry key. The server will still preserve accepted messages.",
+        );
+      }
     }
     const controller = new AbortController();
-    abort.current = controller;
+    if (!background) abort.current = controller;
     try {
       const response = await fetch("/api/assistant", {
         method: "POST",
@@ -201,7 +226,12 @@ export default function AssistantPage() {
       const result = await response.json();
       if (!response.ok)
         throw new Error(result.error || "Could not finish the reply.");
-      setObservedAt(Date.now());
+      // A preempted carryover request must not overwrite a newer foreground
+      // reply or clear its retry key. The foreground response reloads state.
+      if (background) {
+        if (!inFlight.current) await refresh(localDate());
+        return;
+      }
       setState(result.state);
       setDate(result.state.date);
       if (result.connection) setConnection(result.connection);
@@ -210,23 +240,28 @@ export default function AssistantPage() {
         sessionStorage.removeItem(pendingKey);
       } catch {}
     } catch (cause) {
-      setError(
-        controller.signal.aborted
-          ? "Reply stopped. Any accepted message and saved memory remain in your history."
-          : cause instanceof Error
-            ? cause.message
-            : "Could not finish the reply.",
-      );
+      if (input.kind !== "catch_up")
+        setError(
+          controller.signal.aborted
+            ? "Reply stopped at the last durable checkpoint. Resume the saved exchange when you’re ready; accepted messages and completed writes remain preserved."
+            : cause instanceof Error
+              ? cause.message
+              : "Could not finish the reply.",
+        );
       try {
-        await refresh(localDate());
+        if (!background || !inFlight.current) await refresh(localDate());
       } catch {
         /* Keep the original failure visible. */
       }
     } finally {
-      inFlight.current = false;
-      abort.current = null;
-      setBusy(false);
-      composer.current?.focus();
+      if (background) {
+        backgroundInFlight.current = false;
+      } else {
+        inFlight.current = false;
+        abort.current = null;
+        setBusy(false);
+        composer.current?.focus();
+      }
     }
   }
   // Prepare a missed closeout on opening, once per last-active document revision.
@@ -254,7 +289,17 @@ export default function AssistantPage() {
       return;
     const key = `${state.lastActiveDate}:${state.today}`;
     if (catchingUp.current.has(key)) return;
+    if (
+      state.turns.some(
+        (turn) =>
+          turn.local_date === state.today &&
+          turn.input_json.kind === "catch_up" &&
+          turn.input_json.reviewDate === state.lastActiveDate,
+      )
+    )
+      return;
     catchingUp.current.add(key);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Start the one bounded background review only after persisted state proves it is needed.
     void run({
       id: crypto.randomUUID(),
       kind: "catch_up",
@@ -267,20 +312,23 @@ export default function AssistantPage() {
 
   async function send(event?: FormEvent) {
     event?.preventDefault();
-    if (!draft.trim() || !connection || !current || inFlight.current || pending)
+    if (!draft.trim() || !connection || !current || inFlight.current || pending || activeForegroundTurn)
       return;
     const text = draft.trim();
     const sourceMessageId = draftSource;
     const reviewDate = draftReviewDate;
+    const steeringForTurnId = steeringTurnId;
     setDraft("");
     setDraftSource(null);
     setDraftReviewDate(null);
+    setSteeringTurnId(null);
     await run({
       id: crypto.randomUUID(),
       kind: reviewDate ? "closeout" : "message",
       ...(reviewDate ? { reviewDate } : {}),
       text,
       ...(sourceMessageId ? { sourceMessageId } : {}),
+      ...(steeringForTurnId ? { steeringForTurnId } : {}),
     });
   }
   async function navigate(next: string) {
@@ -340,20 +388,96 @@ export default function AssistantPage() {
     }
   }
   const messages = state?.messages ?? [];
+  const backgroundTurnIds = new Set(
+    state?.turns
+      .filter((turn) => turn.input_json.kind === "catch_up")
+      .map((turn) => turn.id) ?? [],
+  );
+  const visibleMessages = messages.filter(
+    (message) => !backgroundTurnIds.has(message.turn_id),
+  );
+  const initialization = state?.initialization ?? {
+    phase: "idle" as const,
+    availableTimeAnswered: false,
+    brainDumpAnswered: false,
+    companyMoveAnswered: false,
+    completedAt: null,
+  };
+  const foregroundPending = pending?.kind === "catch_up" ? null : pending;
   const pendingVisible =
-    pending && !messages.some((m) => m.turn_id === pending.id);
+    foregroundPending &&
+    !messages.some((m) => m.turn_id === foregroundPending.id);
   const prior = state?.dates
     .filter((d) => d < date)
     .sort()
     .at(-1);
   const next = state?.dates.filter((d) => d > date).sort()[0];
   const latest = state?.turns.find((t) => t.local_date === date);
-  const recoverable = state?.turns.find(
+  // The server reconciles expired leases; timestamps alone do not establish
+  // ownership, and an old failure must not shadow a newer completed exchange.
+  const needsRecovery = (turn: PlanningTurn) => turn.status === "failed";
+  const hasSteeringSuccessor = (turnId: string) =>
+    state?.turns.some(
+      (successor) => successor.input_json.steeringForTurnId === turnId,
+    );
+  const latestForeground = state?.turns.find(
     (t) =>
-      t.status === "failed" ||
-      (t.status === "running" &&
-        observedAt - Date.parse(t.updated_at) > 300_000),
+      t.local_date === date &&
+      t.input_json.kind !== "catch_up" &&
+      !hasSteeringSuccessor(t.id),
   );
+  const recoverable = latestForeground && needsRecovery(latestForeground)
+    ? latestForeground
+    : null;
+  const pendingTurn = foregroundPending
+    ? state?.turns.find((turn) => turn.id === foregroundPending.id)
+    : null;
+  const activeForegroundTurn = state?.turns.find(
+    (turn) =>
+      turn.local_date === date &&
+      turn.input_json.kind !== "catch_up" &&
+      !hasSteeringSuccessor(turn.id) &&
+      turn.status === "running" &&
+      !needsRecovery(turn),
+  );
+  const activeTurn = state?.turns.find((turn) => turn.status === "running");
+  const pendingNeedsRecovery =
+    foregroundPending && (!pendingTurn || needsRecovery(pendingTurn));
+  const recoveryInput = pendingNeedsRecovery
+    ? foregroundPending
+    : recoverable
+      ? { id: recoverable.id, ...recoverable.input_json }
+      : null;
+  const backgroundTurn = state?.turns.find(
+    (t) =>
+      current &&
+      t.local_date === today &&
+      t.input_json.kind === "catch_up" &&
+      t.input_json.reviewDate === state.lastActiveDate,
+  );
+  const backgroundNeedsRecovery =
+    backgroundTurn && needsRecovery(backgroundTurn);
+
+  useEffect(() => {
+    if (!current || !activeTurn) return;
+    const timer = setInterval(() => {
+      void refresh(localDate()).catch((cause) => setError(cause.message));
+    }, 2_000);
+    return () => clearInterval(timer);
+  }, [activeTurn, current, refresh]);
+
+  useEffect(() => {
+    const refreshOnReturn = () => {
+      if (!inFlight.current && document.visibilityState === "visible")
+        void refresh().catch((cause) => setError(cause.message));
+    };
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
+    return () => {
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+    };
+  }, [refresh]);
 
   return (
     <main className={styles.page}>
@@ -382,7 +506,7 @@ export default function AssistantPage() {
               Messages and core memory are saved to Personal OS. Task changes
               wait for your review.
             </p>
-            <p>Dates use America/Chicago. Keep this local server running.</p>
+            <p>Days roll over at 4 a.m. Pacific. Keep this local server running.</p>
             <div className={styles.detailsActions}>
               <button
                 type="button"
@@ -502,16 +626,61 @@ export default function AssistantPage() {
         </section>
       )}
       <div
-        className={`${styles.workspace} ${!messages.length ? styles.emptyWorkspace : ""}`}
+        className={`${styles.workspace} ${!visibleMessages.length ? styles.emptyWorkspace : ""}`}
       >
         <div className={styles.conversationArea}>
-          {!!displayedReviews.length && (
-            <ReviewPanel
-              reviews={displayedReviews}
-              onPresented={recordPresentation}
-              onSource={(id) => void showSource(id)}
-              onCorrect={correct}
-            />
+          {(!!displayedReviews.length || backgroundTurn) && (
+            <details
+              className={styles.carryoverDisclosure}
+              open={carryoverOpen}
+              onToggle={(event) =>
+                setCarryoverOpen(event.currentTarget.open)
+              }
+            >
+              <summary>
+                Carryover from {displayedReviews[0]?.local_date ?? state?.lastActiveDate}
+                {displayedReviews.length
+                  ? " · review available"
+                  : backgroundNeedsRecovery
+                    ? " · review needs attention"
+                    : backgroundTurn?.status === "running"
+                      ? " · preparing review"
+                      : " · review incomplete"}
+              </summary>
+              {carryoverOpen && !!displayedReviews.length && (
+                <ReviewPanel
+                  reviews={displayedReviews}
+                  onPresented={recordPresentation}
+                  onSource={(id) => void showSource(id)}
+                  onCorrect={correct}
+                />
+              )}
+              {carryoverOpen && !displayedReviews.length && backgroundTurn && (
+                <div className={styles.carryoverRecovery}>
+                  <p>
+                    The background carryover review did not finish. This does
+                    not block today’s conversation or morning opening.
+                  </p>
+                  {backgroundNeedsRecovery && (
+                    <button
+                      type="button"
+                      disabled={busy || !connection}
+                      onClick={() =>
+                        void run({
+                          id:
+                            backgroundTurn.status === "completed"
+                              ? crypto.randomUUID()
+                              : backgroundTurn.id,
+                          ...backgroundTurn.input_json,
+                        })
+                      }
+                    >
+                      Retry carryover review
+                    </button>
+                  )}
+                </div>
+              )}
+            </details>
           )}
           {!!closingReviews.length && (
             <ReviewPanel
@@ -521,21 +690,15 @@ export default function AssistantPage() {
               onCorrect={correct}
             />
           )}
-          {!messages.length && !pending && (
-            <div className={styles.welcome}>
-              <span className={styles.welcomeMark} aria-hidden="true">
-                ✳
-              </span>
-              <h2>{current ? "What’s on your mind?" : "A quiet day."}</h2>
-              <p>
-                {current
-                  ? "Make a little room to think."
-                  : "No exchanges recorded for this date."}
-              </p>
-            </div>
+          {!visibleMessages.length && !pending && !current && (
+              <div className={styles.welcome}>
+                <span className={styles.welcomeMark} aria-hidden="true">✳</span>
+                <h2>A quiet day.</h2>
+                <p>No exchanges recorded for this date.</p>
+              </div>
           )}
           <div aria-label="Conversation" className={styles.conversation}>
-            {messages.map((message) => (
+            {visibleMessages.map((message) => (
               <article
                 key={message.id}
                 aria-label={
@@ -587,11 +750,13 @@ export default function AssistantPage() {
                       .filter(
                         (r) =>
                           r.turn_id === message.turn_id &&
-                          r.tool.startsWith("save_"),
+                          (r.tool.startsWith("save_") ||
+                            r.tool === "set_today_focus"),
                       )
-                      .map(
-                        (r) =>
-                          `${String(r.result_json.home)} r${String(r.result_json.revision)}`,
+                      .map((r) =>
+                        r.tool === "set_today_focus"
+                          ? `Today’s focus · ${Array.isArray(r.result_json.entries) ? r.result_json.entries.length : Array.isArray(r.result_json.task_ids) ? r.result_json.task_ids.length : 0} priorities`
+                          : `${String(r.result_json.home)} r${String(r.result_json.revision)}`,
                       )
                       .join(" · ")}
                   </p>
@@ -606,7 +771,7 @@ export default function AssistantPage() {
           </div>
           {pendingVisible && (
             <article className={styles.userMessage}>
-              <MessageText text={pending.text} />
+              <MessageText text={foregroundPending.text} />
             </article>
           )}
           {busy && (
@@ -614,6 +779,39 @@ export default function AssistantPage() {
               <span aria-hidden="true">✳</span> Thinking and updating working
               state…
             </p>
+          )}
+          {!busy && activeForegroundTurn && (
+            <p role="status" className={styles.thinking}>
+              <span aria-hidden="true">✳</span> Hermes is still working. You can
+              use the rest of Personal OS; the response will appear here when
+              it finishes.
+            </p>
+          )}
+          {current && state && !foregroundPending && (
+            <MorningOpening
+              state={initialization}
+              disabled={!connection || busy || Boolean(activeForegroundTurn)}
+              onBegin={() =>
+                void run({
+                  id: crypto.randomUUID(),
+                  kind: "message",
+                  text:
+                    initialization.phase === "paused"
+                      ? "Let’s continue the morning opening."
+                      : "Let’s begin the morning opening.",
+                  morningAction:
+                    initialization.phase === "paused" ? "continue" : "begin",
+                })
+              }
+              onPause={() =>
+                void run({
+                  id: crypto.randomUUID(),
+                  kind: "message",
+                  text: "Pause the morning opening for now.",
+                  morningAction: "pause",
+                })
+              }
+            />
           )}
           {state && (
             <ProposalList
@@ -640,37 +838,61 @@ export default function AssistantPage() {
               {!state && <Link href="/">Open Home to sign in</Link>}
             </div>
           )}
-          {!busy && connection && (pending || recoverable) && (
-            <div className={styles.recovery}>
-              <span>A previous exchange needs attention.</span>
-              <button
-                type="button"
-                onClick={() =>
-                  void run(
-                    pending || {
-                      id: recoverable!.id,
-                      ...recoverable!.input_json,
-                    },
-                  )
-                }
-              >
-                Retry saved exchange
-              </button>
-              {pending && (
+          {!busy &&
+            connection &&
+            !steeringTurnId &&
+            recoveryInput && (
+              <div className={styles.recovery}>
+                <span>{pendingNeedsRecovery && !pendingTurn
+                  ? "Your message was not submitted. You can retry it."
+                  : "A previous exchange needs attention."}</span>
                 <button
                   type="button"
+                  onClick={() => void run(recoveryInput)}
+                >
+                  {pendingNeedsRecovery && !pendingTurn ? "Retry message" : "Resume saved exchange"}
+                </button>
+                {!(pendingNeedsRecovery && !pendingTurn) && <button
+                  type="button"
                   onClick={() => {
+                    const saved = recoveryInput;
+                    if (!saved) return;
+                    const sourceMessage = messages.find(
+                      (message) =>
+                        message.turn_id === saved.id && message.role === "user",
+                    );
                     try {
                       sessionStorage.removeItem(
                         `${PENDING_KEY}:${state?.userId}`,
                       );
                     } catch {}
                     setPending(null);
+                    setSteeringTurnId(saved.id);
+                    setDraftSource(sourceMessage?.id ?? null);
+                    setDraft("");
+                    composer.current?.focus();
                   }}
                 >
-                  Leave saved and continue
-                </button>
-              )}
+                  Steer instead
+                </button>}
+              </div>
+            )}
+          {steeringTurnId && (
+            <div className={styles.recovery}>
+              <span>
+                Write the new direction below. The assistant will restart only
+                the saved coarse agent step.
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSteeringTurnId(null);
+                  setDraftSource(null);
+                  setDraft("");
+                }}
+              >
+                Cancel steering
+              </button>
             </div>
           )}
           {state?.warnings.map((warning) => (
@@ -710,7 +932,9 @@ export default function AssistantPage() {
               <div className={styles.composerBar}>
                 <span className={styles.composerHint}>
                   {draftSource
-                    ? "Continuing an earlier exchange"
+                    ? steeringTurnId
+                      ? "Steering the saved exchange"
+                      : "Continuing an earlier exchange"
                     : checking
                       ? "Connecting…"
                       : !connection
@@ -732,7 +956,7 @@ export default function AssistantPage() {
                   <button
                     className={styles.sendButton}
                     type="submit"
-                    disabled={!draft.trim() || !connection || Boolean(pending)}
+                    disabled={!draft.trim() || !connection || Boolean(pending) || Boolean(activeForegroundTurn)}
                     aria-label="Send message"
                   >
                     ↑

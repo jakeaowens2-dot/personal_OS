@@ -1,5 +1,186 @@
 # Tasks
 
+## Forward-only 4am waking day and full app release — 2026-11-15
+
+New work, ledger and behavior rows persist `activity_date` using 4 a.m. Pacific.
+Old NULL labels retain their calendar-day grouping. There is no backfill, timestamp
+shift, task-link reassignment, duration change or repricing. Manual Today/Yesterday
+uses the waking day and preserves an original timestamp for non-date historical
+edits. Totals, weekly views, habits, focus, paper defaults and the assistant use the
+same day policy; existing conversation dates and graph thread keys are untouched.
+Day-scoped SQL functions now share `productivity_day()`. Healthy check-in uniqueness
+respects new labels while retaining the legacy calendar key for historical rows.
+
+The migration is active. In-transaction checksums confirmed unchanged existing
+work blocks (408), ledger events (433), behaviors (205), task links (460), assistant
+messages (268), memory documents (31), and focus items (82). A brief hot-reload/schema
+mismatch surfaced before the nullable columns were added; the signed-in app was
+recovered without requesting login. At 2:49 a.m. November 15, the header correctly
+showed November 14. Full-release comparison also restored deployed manual-work and
+attribution retry IDs, synchronous double-submit guards and saving controls.
+
+Verification includes ten new day/attribution tests, all assistant/economy/timer/task
+regressions, typecheck, lint, build, native inspection, and isolated SQL checks of
+real schema migrations (cutoff/DST, unchanged history/links, explicit date edits,
+habit uniqueness and assistant routing). The user explicitly approved publishing
+the whole current app; private one-off data repair receipts remain local/ignored.
+
+## Hermes context-replay timeout repair — 2026-11-07
+
+The stalled task-list exchange was repeatedly killed by the 180-second host
+watchdog while Hermes compressed a roughly 263k-token context. Full workspace
+snapshots were accumulating as native user messages. Replay now deep-copies every
+loaded message, projects obsolete application-state packets into their original
+request/source/flow fields, and replaces historical read_context snapshots with
+refresh markers. Original rows, summaries, receipts, source IDs and persistence
+markers remain intact; only the model-facing replay changes. Current application
+state is still supplied in full. Compression has a 30-second idle / 60-second total
+budget inside the 160-second native turn and 180-second host watchdog. Allowlisted,
+content-free replay metrics are emitted to the local server log.
+
+Verified: 36 Node assistant tests plus six Python preservation/budget tests,
+typecheck, lint and production build. The exact saved steering/retry turn
+`071eb357-bde1-4a4d-bd58-f27e37541c39` completed through the native app in 68 seconds;
+all 52 open/in-progress tasks and the blocked task appear in its saved answer.
+Replay shrank from 835,983 to 97,168 characters while retaining all 70 messages;
+the live first model call used 64,054 input tokens without triggering compression.
+All 236 prior canonical messages and 136 prior memory revisions match their
+pre-repair hashes, and all 1,273 original native message rows match the private
+SQLite backup exactly. The normal follow-on carryover review appended new daily
+revisions; none of the prior versions were removed. No task changes were applied.
+
+Known separate gap: the returned prose miscounts open/in-progress tasks as 53
+despite listing all 52; the saved response was not rewritten. The existing
+non-blocking Turbopack file-tracing warning remains. This is active locally, with
+no hosted deployment or schema migration.
+
+## Attribution library and morning hygiene — 2026-10-27
+
+The attribution library now starts with twelve unfinished tasks ranked by actual
+work use or creation, with explicit Last used / Newest created sorts, whole-library
+search, Show more and opt-in completed history. Archived tasks stay out of the
+picker; existing archived attributions remain editable through their saved IDs.
+Canonical task and usage reads are paged beyond the default 1,000-row response cap.
+
+Final morning synthesis receives a separate full-library scan, independent of the
+recent sixty-task packet, with up to three review candidates. Completed history
+qualifies after seven quiet days, unfinished work after thirty. Current focus,
+pending changes, live prerequisites/parents and unchanged rejected archive
+suggestions are protected. Hermes evaluates relevance against the conversation
+and proposes archival through existing Accept/Reject controls; no automatic task
+deletion, completion or archival occurs. The three warmup questions are unchanged.
+An unavailable scan is disclosed without blocking planning.
+
+Verified: seven task-library tests, all thirty-five assistant tests, the isolated
+PostgreSQL suite (including usage ownership, deleted-work exclusion and archived
+history preservation), typecheck, lint and build. The read-only activity migration
+is active in the configured Supabase project. Native-app inspection verified the
+12-item shortlist, creation-date sort, old-task search and completed-history toggle
+without saving work or interrupting the running timer. A real model-authored
+cleanup proposal remains for the next morning ritual; no real tasks were archived
+during implementation. Hosted Vercel was not deployed.
+
+## Interrupted carryover and foreground recovery — 2026-10-20
+
+Fixed a server-restart orphan: a background carryover review retained a live
+five-minute lease, rejecting the morning-opening request. Foreground requests now
+cancel/drain an in-process carryover worker before using the shared Hermes profile;
+the database permits foreground takeover of abandoned carryover and fences the old
+worker. Authenticated state reads reconcile expired/orphaned running turns without
+deleting messages, checkpoints, receipts or task proposals. Background requests no
+longer occupy the foreground composer/retry state, all live turns are polled, and
+an unaccepted request offers Retry rather than misleading Resume/Steer controls.
+
+Verified: 35 assistant tests, the full isolated PostgreSQL regression suite,
+typecheck, lint and production build. The recovery migration is active in the
+configured Supabase project. Both abandoned October 19/20 carryover rows were
+reconciled; the native app retried the user's blocked opening and displayed the
+first canonical question with Question 1 of 3. Hosted Vercel was not deployed.
+
+## Morning-plan proposal placeholders — 2026-09-29
+
+The final morning synthesis now persists one exact ordered plan across the task
+approval boundary. Existing unfinished tasks enter Today’s Focus immediately; newly
+proposed tasks occupy inert, visible placeholders and enter their planned positions
+only if accepted that day. Rejected or late-approved proposals never schedule
+themselves, and ordinary task acceptance remains distinct from daily scheduling. The
+assistant must propose selected new work before saving focus, and it creates a fresh
+date-specific proposal when today recommits to a completed daily routine rather than
+silently omitting it or reopening history.
+
+The September 29 plan was repaired from its persisted source exchange: 9th & Washburn
+report, customer-facing concept renderings, a fresh September 29 outreach instance,
+MOVITE/Lincoln logistics, and the Shamecha reply. The unrelated camera-strategy item
+was deferred rather than deleted.
+
+## Behavior-tracking parity and balance repair — 2026-09-28
+
+Restored the deployed behavior flow in the local-first branch: Healthy behaviors is
+again a first-class tab with explicit daily water and morning-routine outcomes, the
+missing-yesterday prompt returns on load and after completed work, and every behavior
+category uses the shared previous/next-day selector rather than a date-picker field.
+All categories retain an effective date when created or edited, saves are guarded
+against duplicate submission, and failures stay visible inside the dialog.
+
+The unexpected 7:45 reward balance was independently reconciled against the live
+ledger. Its exact 4:30 increase came from the September 25 +270-minute historical
+correction being applied again; healthy behavior history netted +180 minutes and was
+not the jump. An idempotent, audited -270-minute reversal now preserves both records
+and restores the snapshot balance from 464.4 minutes (7:44.4) to 194.4 minutes
+(3:14.4). Economy tests cover healthy outcomes and correction reversal semantics.
+
+## Durable conversational morning flow — 2026-09-26
+
+Replaced the browser-local morning questionnaire with a coarse LangGraph conversation workflow backed by a private Postgres checkpointer. The assistant now asks the three agreed questions as separate chat turns, checkpoints each collected answer, synthesizes only after the final answer, and preserves the current question across reloads, app closure and stopped-agent recovery. Hermes is the conversational voice on every ritual transition: it responds to the user's latest answer, while a thin graph harness selects and enforces the one canonical next question as the final paragraph. Intermediate turns defer full synthesis and planning writes until the third answer. Ordinary messages still run through one intact Hermes node; while initialization is idle, Hermes addresses the matter first and offers to begin. Explicit pause/decline state, a deterministic “Let’s begin” button, cached retry responses, stop/resume/steer controls and a progress projection keep the flow recoverable without micromanaging Hermes internals. Background catch-up retains its audited structured review but is collapsed and excluded from the primary conversation stream. See `docs/ASSISTANT_FLOW_GRAPH.md`.
+
+Opening-state repair (2026-09-27): a failed automatic carryover review was incorrectly restored from tab storage as a foreground pending exchange, suppressing the morning invitation behind “A previous exchange needs attention.” Background catch-up recovery is now separated from user exchange recovery. It is non-blocking, does not enter the composer recovery bar, cannot prevent a new foreground graph turn, and remains inspectable/retryable only inside the collapsed carryover disclosure.
+
+Immediate first-question repair (2026-09-27): the explicit “Let’s begin” control now carries a validated `morningAction` and returns the first canonical question directly from the graph without invoking Hermes, eliminating model latency and unnecessary memory writes. Standalone typed affirmations receive the same fast path, while messages containing additional instructions route through the normal agent first. Intermediate answers still receive Hermes’s substantive conversational response, but Hermes now returns only a declarative bridge; the harness removes accidental question sentences and appends exactly one canonical next question, preventing paraphrased duplicates.
+
+In-app background completion repair (2026-09-27): switching from Personal Assistant to the timer or another Personal OS surface no longer aborts the active Hermes request. Returning to Assistant recognizes a fresh server-side running turn as active rather than failed, shows a quiet background-working status, polls the durable turn until completion, and clears the tab retry key once the saved reply arrives. The explicit Stop control remains the only in-page cancellation path; failed and stale turns retain Resume and Steer recovery.
+
+Repair verification: typecheck, lint, all 30 assistant tests, production build, and a signed-in native-app Assistant → Work tracking → Assistant round trip passed. No synthetic assistant exchange was created; the next real long-running reply is the in-flight navigation acceptance case.
+
+App-wide timer continuity (2026-09-27): an active, paused, completed or overage timer is now saved under the signed-in workspace identity and restored whenever Work Tracking remounts. Running timers reconcile real wall-clock time while another Personal OS surface is open or the app is reloaded; work that expires away from the timer returns in overage, while an expired break returns complete. Surface navigation no longer blocks on an unfinished-timer warning. Logging a completed work session remains an explicit action on Work Tracking. Eight timer-runtime tests, all 31 assistant regressions, typecheck, lint, production build, and a native-app Work Tracking → Personal Assistant → Work Tracking round trip passed against a real running timer without pausing or resetting it.
+
+Background clock repair (2026-09-27): the mounted timer previously subtracted exactly one second per JavaScript interval callback. macOS/WebKit throttles those callbacks when Personal OS is on another Desktop, so the display could advance by only twelve minutes during twenty-five minutes of real work. Interval callbacks now refresh from a durable wall-clock timestamp and account for the entire elapsed interval in one reconciliation. Full-second boundaries are retained between refreshes to prevent cumulative fractional drift; focus and visibility changes trigger an immediate refresh. The same clock governs work countdowns, breaks and overage. A dedicated delayed-callback test verifies that one refresh after twenty-five elapsed minutes deducts all twenty-five minutes.
+
+Morning-plan focus repair (2026-09-27): task approval and daily scheduling are now separate. The former acceptance trigger incorrectly put every newly approved unfinished task into Today’s Focus—even work the morning plan explicitly deferred—while existing tasks selected by the plan were omitted because they needed no task-change proposal. Only final morning synthesis can now atomically replace Today’s Focus with its exact ordered existing-task list. Intermediate and ordinary turns cannot use that operation; task creation and edits remain separately approval-gated; an accepted completion still settles a task already present today. The write is source-bound, lease-bound, retry-safe and visibly receipted.
+
+The migration is active in the configured Supabase project. Today’s saved plan was repaired without changing its source conversation or canonical tasks: `Deliver 9th & Washburn report to Historic Old Town NIA` is first, `Complete daily marketing outreach` second, and `Reading daily paper` third; the camera/safety roadmap is retained as a task but deferred from today. Verification: 31 assistant tests, the full isolated PostgreSQL suite through PGlite, typecheck, lint, production build, live function/trigger inspection and post-correction database read-back.
+
+Verification: 30 assistant tests including deterministic button entry, agent-authored one-at-a-time progression, duplicate-question removal, intermediate write denial, normal-agent routing, cached retry, forced-failure morning resume and user-authored steering; the full isolated assistant SQL suite through PGlite; typecheck, lint, production build, live Postgres checkpoint round-trip with synthetic thread deletion, schema access denial for browser roles, and signed-in native-app inspection/reload. No synthetic Personal OS messages were written during automated acceptance.
+
+## Natural work correction and native history navigation — 2026-09-26
+
+Natural Pomodoro completions now expose the same audited work-block editor as manual entries, including calendar day, duration, note and task attribution. Date edits preserve the original local time of day and move the timer session, work block, ledger event and replacement attribution timestamps together; duration edits update the corresponding ledger delta without relabeling a natural completion as manual work. The macOS WebKit shell now handles new-window navigation itself, so “Full history” opens in a second authenticated Personal OS window without resetting an unfinished timer; external links still open in the default browser.
+
+## Manual work attribution duplicate-task repair — 2026-09-25
+
+The local and hosted “Add manually” flow failed before opening because the account merge left two built-in housekeeping tasks and attribution setup expected at most one. The task lookup now deterministically tolerates legacy duplicates, while an additive migration preserves redundant rows and their references as archived legacy history and enforces one active built-in housekeeping task per workspace. The failed UI attempt wrote no timer, work-block, ledger, or attribution record.
+
+## Cross-browser password recovery identity fix — 2026-09-25
+
+The prior PKCE recovery request could begin inside the native WebKit session and complete in a different browser without its verifier. Supabase then preserved the browser's existing anonymous session, making a failed callback look like an empty anonymous login. Password recovery now uses a separate non-persistent implicit client so its email link is portable across the app/browser boundary; ordinary sign-in remains cookie-backed PKCE. Anonymous state is cleared before requesting recovery, callback errors are visible, and only a named email session can expose or mutate workspace state. No email was requested during implementation or verification.
+
+## Audited reward-balance reconciliation — 2026-09-25
+
+Implemented explicit minute-granularity reward corrections in the canonical settlement and activity-history display. Corrections preserve all historical work, behavior and spend events; a signed `reward_minutes_delta` and visible reason explain the adjustment instead of rewriting source records. The authorized one-time `+270 minute` reconciliation brings the migrated working history from -463.8 to -193.8 minutes, displayed as `-3:14`.
+
+## Named-account ownership enforcement and working-history merge — 2026-09-25
+
+Completed locally and in the configured Supabase project. Anonymous identities are no longer accepted as Personal OS workspace users on the timer, task, assistant, project, agent-context, shared-header or Knowledge & Growth paths; a named email login is required before application data can load or mutate. Twenty-one live tables also have a restrictive named-account RLS policy, verified to expose zero tasks to the retired anonymous identity and all 33 tasks/200 active sessions to `jake@cumulant.ai`. The authoritative anonymous working history beginning 2026-08-23 was transactionally merged into that account: 200 active sessions/work blocks, 221 ledger events, 74 behavior events, 22 reward rules/redemptions, 25 historical tasks with 33 revisions, 213 source attributions and seven source focus days. Exact Yahoo test copies already under the target were retained as soft-deleted audit records instead of double-counted. Existing Cumulant assistant state remained 19 messages and nine memory revisions; Gmail/Yahoo test accounts were untouched. The current event history recalculates to -463.8 reward minutes (`-7:44` in the UI). A private pre-merge database snapshot and assertion-heavy migration receipt were retained locally. Lint, typecheck, production build, 21 assistant tests, PGlite SQL suite including anonymous-write rejection, migration dry run, commit assertions and independent post-commit ownership/balance checks passed.
+
+## Local app, guided morning opening, and Knowledge & Growth — 2026-09-25
+
+Implemented and activated as a bounded adoption milestone. Personal OS now builds as a signed macOS app with its own window, Dock identity and icon; launching the app starts the loopback Next.js/Hermes workspace and quitting it stops the server. The app is installed at `~/Applications/Personal OS.app`. The first local sign-in remains a user action because the app has its own private web session.
+
+The empty Personal Assistant day now offers a three-question morning opening covering actual time and away-from-desk obligations, an unfiltered brain dump, and the user's view of the highest-leverage company move. Submitting the opening creates one normal sourced assistant exchange that combines those answers with current Personal OS context and yesterday's carryover. It asks for a concrete plan for today plus a deliberately tentative, non-day-by-day outlook for the rest of the week; it does not bypass task review or add a scheduler.
+
+Added a distinct Knowledge & Growth tab with one deliberately narrow job: record a completed paper, citation/link, date and the user's notes in an owner-scoped durable paper log. The additive migration is active on the configured Supabase project with RLS and four ownership policies verified. This is a profile surface and durable log, not yet a second autonomous model runtime, recommendation engine or knowledge graph.
+
+Verification: typecheck, lint, 21 assistant tests, full isolated PostgreSQL suite through PGlite, production build, signed macOS bundle checks, live Supabase schema/policy checks, and native app startup/navigation/shutdown inspection passed. Signed-in morning submission and a real paper entry remain the user's first-use acceptance steps.
+
 ## Task Status/History and durable chat decisions — 2026-09-20
 
 Completed locally and migration activated: cards show a single executive Status summary and expandable dated History from canonical task revisions. Removed inline previous-progress clutter and empty prerequisite sections. Pending cards remain in the review queue; acceptance/rejection permanently attaches a card to the latest saved assistant reply, including across reloads/date navigation. Backfilled five existing decisions using their resolution timestamps without changing task content. Daily history loads its attached decisions instead of the latest 200 proposals globally. Typecheck/lint, 21 tests, full isolated SQL suite and signed-in browser inspection passed.
@@ -22,9 +203,7 @@ Audited the real planning turn: two sourced memory revisions, five tool receipts
 
 ## Shared workspace surfaces — 2026-09-20
 
-Implemented locally: shared date/account/status/settings ribbon and route tabs for Work tracking (`/`), Personal Assistant (`/assistant`), and Task Management (`/settings/tasks`). Removed duplicate page branding/account headers; retained surface-specific controls. Compact tabs wrap labels on narrow screens. The ribbon and tabs stay pinned together at the top while page content scrolls beneath their opaque background; verified against the long assistant conversation (2026-09-20). Home warns before a tab switch discards an unfinished timer; timer persistence across routes remains a separate limitation. Verified signed-in navigation across all three surfaces, desktop/mobile layouts, and the timer warning; typecheck/lint and 18 assistant regression tests passed. Not deployed: the assistant remains local-only.
-
-This file defines the phased rollout.
+Implemented locally: shared date/account/status/settings ribbon and route tabs for Work tracking (`/`), Personal Assistant (`/assistant`), and Task Management (`/settings/tasks`). Removed duplicate page branding/account headers; retained surface-specific controls. Compact tabs wrap labels on narrow screens. The ribbon and tabs stay pinned together at the top while page content scrolls beneath their opaque background; verified against the long assistant conversation (2026-09-20). The original unfinished-timer navigation warning and route-persistence limitation were superseded by app-wide timer continuity on 2026-09-27. Typecheck/lint and 18 assistant regression tests passed. Not deployed: the assistant remains local-only.
 
 This file defines the phased rollout.
 
@@ -145,6 +324,20 @@ Status: Implemented in the bounded pilot; signed-in browser rollover acceptance 
   uncertain items survive rollover, and user corrections remain effective.
 - Separately verify successor recovery of core app state without requiring a
   normal daily agent reset or replication of all harness-internal memory.
+
+## Economy and history refinement (2026-09-05)
+
+Status: Complete
+
+Note: Effective-dated the new economy from September 5, 2026 so earlier work retains
+the 20/30-minute reward rates while new work earns 15/22.5 minutes; screen-time penalties
+likewise change to 1:1 only from rollout. Rebuilt Weekly
+Overview as seven aligned day columns with two-wide block groups and daily totals;
+destroyed-reward marks now overlay the reward blocks they consume. Added a separate
+cursor-paginated activity history route that continuously loads older ledger and
+behavior events. Added a migration allowing fractional penalty minutes without
+rewriting historical events. Verified with
+`npm run lint`, `npm run typecheck`, and `npm run build`.
 
 ## Product Direction — Personal Assistant and Morning Brief (2026-09-01)
 

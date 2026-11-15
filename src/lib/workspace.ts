@@ -1,6 +1,7 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { createLocalCompletionArtifacts } from "@/lib/ledger";
 import { workBlockDeltaForDuration } from "@/lib/economy";
+import { wakingDateKey } from "./activity-day";
 import type {
   LedgerEvent,
   RewardRedemption,
@@ -25,11 +26,17 @@ type PersistCompletionInput = {
 };
 
 type PersistManualWorkBlockInput = {
+  artifactIds?: ManualWorkArtifactIds;
   completedAt: string;
   durationMinutes: number;
   note?: string;
   userId: string;
 };
+
+export type ManualWorkArtifactIds = { ledgerEventId: string; timerSessionId: string; workBlockId: string };
+export function createManualWorkArtifactIds(): ManualWorkArtifactIds {
+  return { ledgerEventId: crypto.randomUUID(), timerSessionId: crypto.randomUUID(), workBlockId: crypto.randomUUID() };
+}
 
 type PersistRewardSpendInput = {
   costWorkBlocks: number;
@@ -46,6 +53,7 @@ type WorkBlockAttributionSelection = {
 };
 
 type PersistWorkBlockAttributionsInput = {
+  attributionIds?: string[];
   durationMinutes: number;
   ledgerEvent: LedgerEvent;
   note?: string;
@@ -61,8 +69,9 @@ type SoftDeleteInput = {
   userId: string;
 };
 
-type UpdateManualWorkEntryInput = {
+type UpdateWorkEntryInput = {
   actorLabel: string;
+  completedAt: string;
   durationMinutes: number;
   ledgerEvent: LedgerEvent;
   note?: string;
@@ -81,6 +90,10 @@ type UpdateRewardSpendEntryInput = {
 };
 
 export const AUTH_REQUIRED_MESSAGE = "Sign in with your email to load your workspace.";
+
+export function isNamedWorkspaceUser(user: User | null | undefined): user is User {
+  return Boolean(user?.email && !user.is_anonymous);
+}
 
 function isSchemaCacheTableError(message: string) {
   const normalizedMessage = message.toLowerCase();
@@ -132,7 +145,7 @@ export async function ensureWorkspaceUser(supabase: SupabaseClient) {
     throw new Error(toErrorMessage(error, "Could not read the current workspace session."));
   }
 
-  if (!user) {
+  if (!isNamedWorkspaceUser(user)) {
     throw new Error(AUTH_REQUIRED_MESSAGE);
   }
 
@@ -149,13 +162,13 @@ export async function fetchWorkspaceData(supabase: SupabaseClient, userId: strin
       .order("started_at", { ascending: false }),
     supabase
       .from("work_blocks")
-      .select("id, user_id, timer_session_id, earned_at, duration_minutes, tag, quality_rating")
+      .select("id, user_id, timer_session_id, earned_at, duration_minutes, tag, quality_rating, activity_date")
       .eq("user_id", userId)
       .is("deleted_at", null)
       .order("earned_at", { ascending: false }),
     supabase
       .from("ledger_events")
-      .select("id, user_id, event_type, delta_work_blocks, delta_reward_blocks, source, metadata, created_at")
+      .select("id, user_id, event_type, delta_work_blocks, delta_reward_blocks, source, metadata, created_at, activity_date")
       .eq("user_id", userId)
       .is("deleted_at", null)
       .order("created_at", { ascending: false }),
@@ -226,11 +239,11 @@ export async function persistCompletedWorkSession(
 
 export async function persistManualWorkBlock(
   supabase: SupabaseClient,
-  { completedAt, durationMinutes, note, userId }: PersistManualWorkBlockInput,
+  { artifactIds = createManualWorkArtifactIds(), completedAt, durationMinutes, note, userId }: PersistManualWorkBlockInput,
 ) {
   const endedAt = completedAt;
   const startedAt = new Date(new Date(completedAt).getTime() - durationMinutes * 60 * 1000).toISOString();
-  const timerSessionId = crypto.randomUUID();
+  const timerSessionId = artifactIds.timerSessionId;
 
   const timerSession: TimerSession = {
     id: timerSessionId,
@@ -245,7 +258,8 @@ export async function persistManualWorkBlock(
   };
 
   const workBlock: WorkBlock = {
-    id: crypto.randomUUID(),
+    activity_date: wakingDateKey(endedAt),
+    id: artifactIds.workBlockId,
     user_id: userId,
     timer_session_id: timerSessionId,
     earned_at: endedAt,
@@ -255,7 +269,8 @@ export async function persistManualWorkBlock(
   };
 
   const ledgerEvent: LedgerEvent = {
-    id: crypto.randomUUID(),
+    activity_date: workBlock.activity_date,
+    id: artifactIds.ledgerEventId,
     user_id: userId,
     event_type: "work_earned",
     delta_work_blocks: workBlockDeltaForDuration(durationMinutes),
@@ -267,6 +282,7 @@ export async function persistManualWorkBlock(
       mode: "work",
       duration_minutes: durationMinutes,
       note: note?.trim() || null,
+      recorded_at: new Date().toISOString(),
     },
     created_at: endedAt,
   };
@@ -347,6 +363,7 @@ export async function persistRewardSpend(
     id: crypto.randomUUID(),
     user_id: userId,
     event_type: "reward_spent",
+    activity_date: wakingDateKey(redeemedAt),
     delta_work_blocks: -costWorkBlocks,
     delta_reward_blocks: 0,
     source: "manual_reward_redemption",
@@ -467,19 +484,20 @@ async function softDeleteAttributionsForWorkBlock(
 
 export async function persistWorkBlockAttributions(
   supabase: SupabaseClient,
-  { durationMinutes, ledgerEvent, note, selections, userId, workBlockId }: PersistWorkBlockAttributionsInput,
+  { attributionIds, durationMinutes, ledgerEvent, note, selections, userId, workBlockId }: PersistWorkBlockAttributionsInput,
 ) {
   const shareCount = selections.length;
 
   if (shareCount === 0) {
     throw new Error("Choose at least one task or category for this work block.");
   }
+  if (attributionIds && attributionIds.length !== shareCount) throw new Error("Work attribution identifiers do not match the selected tasks.");
 
   const baseMinutes = Math.floor(durationMinutes / shareCount);
   const remainderMinutes = durationMinutes % shareCount;
 
   const attributions: WorkBlockAttribution[] = selections.map((selection, index) => ({
-    id: crypto.randomUUID(),
+    id: attributionIds?.[index] ?? crypto.randomUUID(),
     user_id: userId,
     work_block_id: workBlockId,
     task_id: selection.taskId,
@@ -491,7 +509,7 @@ export async function persistWorkBlockAttributions(
 
   const { error: insertError } = await supabase
     .from("work_block_attributions")
-    .insert(attributions);
+    .upsert(attributions, { onConflict: "id" });
 
   if (insertError) {
     throw new Error(
@@ -562,9 +580,9 @@ export async function fetchAttributionSelectionsForWorkBlock(
   }));
 }
 
-export async function updateManualWorkEntry(
+export async function updateWorkEntry(
   supabase: SupabaseClient,
-  { actorLabel, durationMinutes, ledgerEvent, note, selections, userId }: UpdateManualWorkEntryInput,
+  { actorLabel, completedAt, durationMinutes, ledgerEvent, note, selections, userId }: UpdateWorkEntryInput,
 ) {
   const timerSessionId = getMetadataString(ledgerEvent.metadata, "timer_session_id");
   const workBlockId = getMetadataString(ledgerEvent.metadata, "work_block_id");
@@ -573,7 +591,7 @@ export async function updateManualWorkEntry(
     throw new Error("This work event is missing its linked session records and cannot be edited safely.");
   }
 
-  const endedAt = ledgerEvent.created_at;
+  const endedAt = completedAt;
   const startedAt = new Date(new Date(endedAt).getTime() - durationMinutes * 60 * 1000).toISOString();
 
   const { error: timerSessionError } = await supabase
@@ -582,14 +600,14 @@ export async function updateManualWorkEntry(
       planned_minutes: durationMinutes,
       started_at: startedAt,
       ended_at: endedAt,
-      notes: note?.trim() || "Manual work block entry",
+      notes: note?.trim() || (ledgerEvent.source === "manual_entry" ? "Manual work block entry" : "Completed work session"),
     })
     .eq("id", timerSessionId)
     .eq("user_id", userId)
     .is("deleted_at", null);
 
   if (timerSessionError) {
-    throw new Error(toErrorMessage(timerSessionError, "Could not update the manual timer session."));
+    throw new Error(toErrorMessage(timerSessionError, "Could not update the timer session."));
   }
 
   const { error: workBlockError } = await supabase
@@ -597,14 +615,13 @@ export async function updateManualWorkEntry(
     .update({
       duration_minutes: durationMinutes,
       earned_at: endedAt,
-      tag: "manual",
     })
     .eq("id", workBlockId)
     .eq("user_id", userId)
     .is("deleted_at", null);
 
   if (workBlockError) {
-    throw new Error(toErrorMessage(workBlockError, "Could not update the manual work block."));
+    throw new Error(toErrorMessage(workBlockError, "Could not update the work block."));
   }
 
   await softDeleteAttributionsForWorkBlock(supabase, {
@@ -624,6 +641,8 @@ export async function updateManualWorkEntry(
   const { error: ledgerEventError } = await supabase
     .from("ledger_events")
     .update({
+      created_at: endedAt,
+      delta_work_blocks: workBlockDeltaForDuration(durationMinutes),
       metadata: updatedLedgerMetadata,
     })
     .eq("id", ledgerEvent.id)
@@ -638,6 +657,8 @@ export async function updateManualWorkEntry(
     durationMinutes,
     ledgerEvent: {
       ...ledgerEvent,
+      created_at: endedAt,
+      delta_work_blocks: workBlockDeltaForDuration(durationMinutes),
       metadata: updatedLedgerMetadata,
     },
     selections,
@@ -962,7 +983,7 @@ export async function softDeleteRewardSpendEvent(
 
 export function isEditableLedgerEvent(event: LedgerEvent) {
   return (
-    (event.event_type === "work_earned" && event.source === "manual_entry") ||
+    (event.event_type === "work_earned" && (event.source === "manual_entry" || event.source === "pomodoro_timer")) ||
     (event.event_type === "reward_spent" && event.source === "manual_reward_redemption")
   );
 }
@@ -975,7 +996,7 @@ export function isDeletableLedgerEvent(event: LedgerEvent) {
   return event.event_type === "work_earned" && (event.source === "manual_entry" || event.source === "pomodoro_timer");
 }
 
-export function getManualWorkDefaultsFromLedgerEvent(event: LedgerEvent) {
+export function getWorkEntryDefaultsFromLedgerEvent(event: LedgerEvent) {
   return {
     durationMinutes: getMetadataNumber(event.metadata, "duration_minutes"),
     note: getMetadataString(event.metadata, "note"),

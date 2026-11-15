@@ -5,11 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
 import { PopoverMenu } from "@/components/ui/PopoverMenu";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { pacificWallTime, PRODUCTIVITY_TIME_ZONE, wakingDateKey } from "@/lib/activity-day";
 import styles from "./WorkspaceHeader.module.css";
 
 const surfaces = [
   { href: "/", label: "Work tracking" },
   { href: "/assistant", label: "Personal Assistant" },
+  { href: "/growth", label: "Knowledge & Growth" },
   { href: "/settings/tasks", label: "Task Management" },
 ];
 
@@ -18,10 +20,9 @@ type Props = {
   status?: string;
   onSignOut?: () => void;
   onReset?: () => void;
-  unfinishedTimer?: boolean;
 };
 
-export function WorkspaceHeader({ email, status, onSignOut, onReset, unfinishedTimer = false }: Props) {
+export function WorkspaceHeader({ email, status, onSignOut, onReset }: Props) {
   const pathname = usePathname();
   const client = useMemo(() => createSupabaseBrowserClient(), []);
   const [sessionEmail, setSessionEmail] = useState<string | null>(null);
@@ -31,11 +32,12 @@ export function WorkspaceHeader({ email, status, onSignOut, onReset, unfinishedT
   useEffect(() => {
     const updateDate = () => setDate(new Intl.DateTimeFormat("en-US", {
       weekday: "long", month: "long", day: "numeric",
-    }).format(new Date()));
+      timeZone: PRODUCTIVITY_TIME_ZONE,
+    }).format(pacificWallTime(wakingDateKey())));
     updateDate();
     const timer = setInterval(updateDate, 60_000);
     const subscription = client?.auth.onAuthStateChange((_event, session) => {
-      setSessionEmail(session?.user.email ?? null);
+      setSessionEmail(session?.user.email && !session.user.is_anonymous ? session.user.email : null);
       setReady(true);
     }).data.subscription;
     return () => { clearInterval(timer); subscription?.unsubscribe(); };
@@ -65,11 +67,7 @@ export function WorkspaceHeader({ email, status, onSignOut, onReset, unfinishedT
       </div>
     </div>
     <nav className={styles.tabs} aria-label="Workspace surfaces">
-      {surfaces.map(({ href, label }) => <Link key={href} href={href} aria-current={pathname === href ? "page" : undefined} className={styles.tab}
-        onNavigate={(event) => {
-          if (unfinishedTimer && href !== pathname && !window.confirm("Switching surfaces will reset your unfinished timer. Leave Work tracking?")) event.preventDefault();
-        }}
-      >{label}</Link>)}
+      {surfaces.map(({ href, label }) => <Link key={href} href={href} aria-current={pathname === href ? "page" : undefined} className={styles.tab}>{label}</Link>)}
     </nav>
   </header>;
 }

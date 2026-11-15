@@ -187,7 +187,7 @@ function SafetyEvidenceProjectTrackerWorkspace() {
     if (isLocalPreview) return;
     if (!supabase) return;
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) void connect();
+      if (session?.user?.email && !session.user.is_anonymous) void connect();
       else {
         setUserId(null); setItems([]); setTrackers([]);
         setPageState({ kind: "auth_required", message: AUTH_REQUIRED_MESSAGE });

@@ -2,20 +2,30 @@
 create role anon;
 create role authenticated;
 create schema auth;
-create table auth.users(id uuid primary key);
+create table auth.users(id uuid primary key,email text,is_anonymous boolean not null default false);
 create function auth.uid() returns uuid language sql stable as $$ select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid $$;
 grant usage on schema auth to authenticated,anon;
 \ir ../supabase/migrations/20260528001500_add_tasks_and_revisions.sql
 \ir ../supabase/migrations/20260528011500_add_daily_focus.sql
+\ir ../supabase/migrations/20260823000002_add_focus_status_dropped_and_carried_forward.sql
+\ir ../supabase/migrations/20260823000003_add_focus_item_carry_forward_metadata.sql
 \ir ../supabase/migrations/20260912000000_assistant_daily_planning.sql
 \ir ../supabase/migrations/20260921000000_assistant_task_prerequisites.sql
 \ir ../supabase/migrations/20260921010000_assistant_accepted_focus.sql
 \ir ../supabase/migrations/20260921020000_assistant_chat_decisions.sql
-grant select,update on daily_focus_lists,daily_focus_items to authenticated;
+\ir ../supabase/migrations/20260927000000_assistant_morning_focus.sql
+\ir ../supabase/migrations/20260929000000_assistant_pending_focus_plan.sql
+\ir ../supabase/migrations/20260925000000_add_paper_reading_log.sql
+\ir ../supabase/migrations/20260925010000_require_named_workspace_users.sql
+\ir ../supabase/migrations/20261020000000_assistant_turn_recovery.sql
+grant select,insert,update on daily_focus_lists,daily_focus_items to authenticated;
 -- Match Supabase's existing table grants, protected by the existing task RLS.
 grant select,insert,update on public.tasks to authenticated;
 grant select on public.task_revisions to authenticated;
-insert into auth.users values('11111111-1111-4111-8111-111111111111'),('22222222-2222-4222-8222-222222222222');
+insert into auth.users values
+  ('11111111-1111-4111-8111-111111111111','owner@example.com',false),
+  ('22222222-2222-4222-8222-222222222222','other@example.com',false),
+  ('33333333-3333-4333-8333-333333333333',null,true);
 -- Prior complete response for all normal approval tests.
 insert into assistant_turns(id,user_id,input_json,local_date,status) values('10101010-1010-4010-8010-101010101010','11111111-1111-4111-8111-111111111111','{}',current_date-1,'completed');
 insert into assistant_messages(id,user_id,turn_id,role,text,local_date,created_at) values('20202020-2020-4020-8020-202020202020','11111111-1111-4111-8111-111111111111','10101010-1010-4010-8010-101010101010','assistant','Prior completed response',current_date-1,now()-interval '1 day');
@@ -29,7 +39,17 @@ declare caught boolean:=false; begin
  if not caught then raise exception 'Expected failure, but command succeeded: %',statement; end if;
 end $$;
 set role authenticated;
+select set_config('request.jwt.claim.sub','33333333-3333-4333-8333-333333333333',false);
+select test_expect_error(
+  $q$insert into paper_reading_entries(user_id,title,completed_on,notes) values(auth.uid(),'Anonymous write',current_date,'Must be rejected.')$q$,
+  'row-level security'
+);
 select set_config('request.jwt.claim.sub','11111111-1111-4111-8111-111111111111',false);
+insert into paper_reading_entries(user_id,title,completed_on,notes)
+values(auth.uid(),'Durable knowledge test',current_date,'A sourced reading note.');
+do $$ begin
+ if (select count(*) from paper_reading_entries)<>1 then raise exception 'Owned paper log insert was not readable'; end if;
+end $$;
 select assistant_begin_turn('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','{"kind":"message","text":"My priority is the offline demo. Please mark it in progress."}','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
 select test_expect_error($q$select assistant_begin_turn('cccccccc-cccc-4ccc-8ccc-cccccccccccc','{"kind":"message","text":"Competing tab"}','dddddddd-dddd-4ddd-8ddd-dddddddddddd')$q$,'Another reply');
 do $$
@@ -98,7 +118,10 @@ select set_config('request.jwt.claim.sub','22222222-2222-4222-8222-222222222222'
 do $$ begin
  if exists(select 1 from assistant_messages where user_id<>auth.uid()) or (select count(*) from assistant_memory_documents)>0 then raise exception 'Cross-user data leak'; end if;
  if (select count(*) from assistant_messages)<>1 then raise exception 'Owned history unexpectedly hidden'; end if;
+ if (select count(*) from paper_reading_entries)<>0 then raise exception 'Cross-user paper log leak'; end if;
 end $$;
 select test_expect_error($q$select assistant_resolve_proposal('44444444-4444-4444-8444-444444444444',true)$q$,'unavailable');
 select test_expect_error($q$select assistant_begin_turn('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','{"kind":"message","text":"My priority is the offline demo. Please mark it in progress."}','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')$q$,'different input');
 select 'PASS: ownership, concurrency, retries, memory revisions, reviewed task writes, carry-forward and presentation receipts' as result;
+\ir assistant-turn-recovery.test.sql
+\ir task-library.test.sql

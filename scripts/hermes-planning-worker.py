@@ -11,6 +11,7 @@ import sys
 import threading
 import traceback
 from pathlib import Path
+from hermes_history import project_history, runtime_budgets
 
 wire = sys.stdout
 sys.stdout = sys.stderr
@@ -25,6 +26,7 @@ class PlanningWorkerError(RuntimeError):
 
 def main():
     request = json.loads(sys.stdin.readline())
+    run_seconds, compression_idle, compression_total = runtime_budgets(request)
     install = Path(os.environ["PERSONAL_ASSISTANT_HERMES_INSTALL"])
     profile = Path(os.environ["HERMES_HOME"])
     profile.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -36,7 +38,8 @@ def main():
     config = {
         "model": {"default": request["model"], "provider": "openai-codex", "openai_runtime": "auto"},
         "fallback_providers": [],
-        "agent": {"max_turns": 16, "run_budget_seconds": 160, "reasoning_effort": "low"},
+        "agent": {"max_turns": 16, "run_budget_seconds": run_seconds, "reasoning_effort": "low"},
+        "compression": {"context_timeout_seconds": compression_idle, "context_total_ceiling_seconds": compression_total},
         "terminal": {"backend": "local", "cwd": str(profile / "workspace")},
         "memory": {"memory_enabled": False, "user_profile_enabled": False},
         "auxiliary": {"background_review": {"enabled": False}},
@@ -82,7 +85,7 @@ def main():
             result = response["result"]
             if name == "finish_planning" and result.get("reviewed") is True:
                 reviewed = True
-            elif name.startswith("save_") or name == "propose_task" or result.get("error"):
+            elif name.startswith("save_") or name in {"propose_task", "set_today_focus"} or result.get("error"):
                 reviewed = False
             return json.dumps(result)
     for tool in request["tools"]:
@@ -124,13 +127,15 @@ def main():
         session_id=session_id, session_db=db, platform="personal_os",
         skip_context_files=True, load_soul_identity=False, skip_memory=True,
         skip_background_review=True, quiet_mode=True, verbose_logging=False,
-        max_iterations=16, run_budget_seconds=160, reasoning_config={"effort": "low"},
+        max_iterations=16, run_budget_seconds=run_seconds, reasoning_config={"effort": "low"},
         fallback_model=None,
     )
     allowed = {t["name"] for t in request["tools"]} | {"session_search"}
     if not agent.valid_tool_names.issubset(allowed) or not {t["name"] for t in request["tools"]}.issubset(agent.valid_tool_names):
         raise PlanningWorkerError("Hermes tool availability differs from the application allowlist: " + ", ".join(sorted(agent.valid_tool_names)))
     history = db.get_messages_as_conversation(session_id, repair_alternation=True, include_row_ids=True)
+    history, replay_metrics = project_history(history)
+    emit({"type": "progress", "stage": "context_ready", **replay_metrics})
     try:
         result = agent.run_conversation(
             request["prompt"], system_message=request["instructions"],

@@ -27,6 +27,8 @@ run an unreviewed bulk `db push`. Existing tasks and ledger data were not change
 
 ## Start and activate
 
+The everyday entry point is the installed macOS app at `~/Applications/Personal OS.app`. It opens in its own window, starts the loopback development workspace when needed, and stops the server when the app quits. This keeps daily interface changes immediately available without a release cycle. The launcher restores Next's generated declaration import after startup so ordinary app use does not dirty the repository. The first app session must sign in on Work tracking because the app intentionally has its own private web session. Native-shell/icon changes require `npm run app:build` and copying that verified bundle to Applications; `npm run app:refresh` performs the web verification build and native build together.
+
 1. Already applied to the current project: `supabase/migrations/20260912000000_assistant_daily_planning.sql`. For a new installation, apply it to the
    **existing Personal OS Supabase project**. This additive migration creates only
    assistant tables/functions/policies; it uses existing `tasks` and task-revision
@@ -39,6 +41,12 @@ run an unreviewed bulk `db push`. Existing tasks and ledger data were not change
    `http://localhost:3016/settings/account` in Supabase Auth's redirect allowlist
    (and the hosted equivalent when deployed). A magic-link-only account still needs
    an authenticated session or recovery email before its first password is set.
+   Password recovery uses a link-portable implicit callback because the installed
+   app and system browser do not share storage. Ordinary sign-in remains PKCE and
+   cookie-backed. A successful recovery callback may open in the normal browser and
+   routes to the password form; a failed callback is shown as an error. Old anonymous
+   sessions are cleared before a request and are never offered as password-bearing
+   accounts.
    Authentication is required for durable planning. The old browser-only archive
    remains exportable under Details; it is not silently imported as new facts.
 4. Try a real planning exchange: name a continuing priority and why, give a progress
@@ -55,7 +63,10 @@ Keep the local process running. The launcher binds to `127.0.0.1`; the API also
 requires same-origin loopback requests and rejects ordinary Vercel launches.
 Current native dependency: the existing Hermes installation, tested at
 `~/.hermes/hermes-agent` (0.20.5), with its existing Python environment. No new
-JavaScript framework or runtime dependency was added.
+model-provider abstraction was added. `@langchain/langgraph` now owns coarse
+conversation routing, and `@langchain/langgraph-checkpoint-postgres` persists one
+daily execution thread in the private `assistant_langgraph` schema. It does not
+replace Hermes or application-owned memory. See `ASSISTANT_FLOW_GRAPH.md`.
 
 | Setting | Default |
 | --- | --- |
@@ -89,11 +100,22 @@ an externally exposed multi-user model service.
   Presentation receipts are distinct from approval. Corrections preserve history.
 - Keeps one logical native conversation across daily views. Hermes's own session
   persistence/compaction remains available alongside the current application state.
+  On model replay only, `scripts/hermes_history.py` projects obsolete full-state
+  packets into their original request/source/flow fields and replaces historical
+  read_context snapshots with explicit refresh markers. All message rows, native
+  summaries, receipts, persistence identities and application memories remain
+  stored unchanged. The current state packet is supplied in full for the new turn.
+  Compression uses a 30-second idle / 60-second total budget inside the 160-second
+  native turn budget and 180-second host watchdog. Content-free replay size counts
+  appear in the local server log; no prompt or credential text is logged there.
   Native session search is fenced to this dedicated profile; canonical history
   search provides portable source IDs. Opening an old date never rewinds Hermes.
 - Preserves accepted sources and successful memory writes when a reply fails or is
   interrupted. Retry keeps the original operation ID; a five-minute lease fences
   overlapping tabs and abandoned workers. An unfinished maintenance pass is visible.
+- Asks the morning initialization questions as separate assistant messages. Daily
+  graph state survives reload/app closure; stopped Hermes work resumes from the
+  preceding coarse node rather than replaying the full morning sequence.
 
 ## Runtime boundary
 

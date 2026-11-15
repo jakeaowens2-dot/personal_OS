@@ -301,7 +301,7 @@ export default function TaskSettingsPage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      const user = session?.user ?? null;
+      const user = session?.user?.email && !session.user.is_anonymous ? session.user : null;
 
       if (!user) {
         setWorkspaceUserId(null);

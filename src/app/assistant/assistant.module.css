@@ -96,7 +96,7 @@
   display: flex;
   flex-direction: column;
   width: min(100%, 816px);
-  min-height: calc(100dvh - 178px);
+  min-height: calc(100vh - 178px);
   margin: auto;
   padding: 0 2rem;
 }
@@ -228,12 +228,12 @@
 }
 
 .emptyWorkspace {
-  justify-content: center;
-  padding-bottom: 16vh;
+  justify-content: flex-start;
+  padding-bottom: 4rem;
 }
 .emptyWorkspace .conversationArea {
   flex: initial;
-  padding: 1.5rem 0 2rem;
+  padding: 2.5rem 0 2rem;
 }
 .emptyWorkspace .footer {
   position: static;
@@ -302,7 +302,7 @@
     padding-bottom: max(1rem, env(safe-area-inset-bottom));
   }
   .emptyWorkspace {
-    padding-bottom: 10vh;
+    padding-bottom: 3rem;
   }
 }
 
@@ -417,6 +417,34 @@
   margin: 0.5rem 0 2rem;
   padding: 1rem 0;
   border-bottom: 1px solid var(--border);
+}
+.carryoverDisclosure {
+  margin: 0.5rem 0 1.5rem;
+  border-block: 1px solid var(--border);
+  padding: 0.8rem 0;
+}
+.carryoverDisclosure > summary {
+  color: var(--muted);
+  font-size: 0.76rem;
+  cursor: pointer;
+}
+.carryoverDisclosure .reviewPanel {
+  margin-bottom: 0;
+  border-bottom: 0;
+}
+.carryoverRecovery {
+  display: grid;
+  justify-items: start;
+  gap: 0.65rem;
+  padding-top: 0.8rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+.carryoverRecovery button {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
 .reviewGroup {
   margin-top: 1rem;

@@ -1,16 +1,24 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { BehaviorEvent, BehaviorType } from "@/lib/types";
+import { HEALTHY_BEHAVIOR_REWARD_MINUTES, usesEconomyPolicyV2 } from "@/lib/economy";
+import type { BehaviorEvent, BehaviorType, HealthyBehaviorType } from "@/lib/types";
 
 export const INDULGENCE_PENALTY_MINUTES = 60;
-export const SCREEN_TIME_DAILY_ALLOWANCE_MINUTES = 60;
+
+export function isHealthyBehaviorType(
+  behaviorType: BehaviorType,
+): behaviorType is HealthyBehaviorType {
+  return behaviorType === "waking_routine" || behaviorType === "gallon_water";
+}
 
 const BEHAVIOR_SELECT_COLUMNS = [
   "id",
   "user_id",
   "behavior_type",
   "occurred_at",
+  "activity_date",
   "duration_minutes",
   "penalty_minutes",
+  "healthy_behavior_succeeded",
   "note",
   "deleted_at",
   "deleted_by_actor_label",
@@ -26,23 +34,40 @@ export function getBehaviorTypeLabel(behaviorType: BehaviorType) {
       return "Screen time";
     case "exercise":
       return "Exercise";
+    case "waking_routine":
+      return "Healthy morning habits";
+    case "gallon_water":
+      return "Drink 1 gallon of water";
   }
 }
 
-// Screen time is penalized at 50% up to a 1-hour daily allowance, then at 100% beyond it.
-// Examples (minutes): 60 -> 30, 120 -> 60, 150 -> 90.
-export function computeScreenTimePenalty(screenTimeMinutes: number) {
-  return Math.max(0.5 * screenTimeMinutes, screenTimeMinutes - SCREEN_TIME_DAILY_ALLOWANCE_MINUTES);
+export function computeScreenTimePenalty(
+  screenTimeMinutes: number,
+  occurredAt = new Date().toISOString(),
+) {
+  if (!usesEconomyPolicyV2(occurredAt)) {
+    return Math.max(0.5 * screenTimeMinutes, screenTimeMinutes - 60);
+  }
+
+  return Math.max(0, screenTimeMinutes);
 }
 
-export function computeBehaviorPenalty(behaviorType: BehaviorType, durationMinutes: number | null) {
+export function computeBehaviorPenalty(
+  behaviorType: BehaviorType,
+  durationMinutes: number | null,
+  occurredAt?: string,
+  healthyBehaviorSucceeded?: boolean | null,
+) {
   switch (behaviorType) {
     case "indulgence":
       return INDULGENCE_PENALTY_MINUTES;
     case "screen_time":
-      return computeScreenTimePenalty(durationMinutes ?? 0);
+      return computeScreenTimePenalty(durationMinutes ?? 0, occurredAt);
     case "exercise":
       return 0;
+    case "waking_routine":
+    case "gallon_water":
+      return healthyBehaviorSucceeded === false ? HEALTHY_BEHAVIOR_REWARD_MINUTES : 0;
   }
 }
 
@@ -51,11 +76,18 @@ export type BehaviorEntryInput = {
   durationMinutes?: number | null;
   note?: string;
   occurredAt?: string;
+  healthyBehaviorSucceeded?: boolean | null;
   userId: string;
 };
 
 export async function persistBehaviorEvent(supabase: SupabaseClient, input: BehaviorEntryInput) {
-  const penaltyMinutes = computeBehaviorPenalty(input.behaviorType, input.durationMinutes ?? null);
+  const occurredAt = input.occurredAt ?? new Date().toISOString();
+  const penaltyMinutes = computeBehaviorPenalty(
+    input.behaviorType,
+    input.durationMinutes ?? null,
+    occurredAt,
+    input.healthyBehaviorSucceeded,
+  );
   const durationMinutes =
     input.behaviorType === "exercise" || input.behaviorType === "screen_time"
       ? input.durationMinutes ?? null
@@ -66,15 +98,22 @@ export async function persistBehaviorEvent(supabase: SupabaseClient, input: Beha
     .insert({
       user_id: input.userId,
       behavior_type: input.behaviorType,
-      occurred_at: input.occurredAt ?? new Date().toISOString(),
+      occurred_at: occurredAt,
       duration_minutes: durationMinutes,
       penalty_minutes: penaltyMinutes,
+      healthy_behavior_succeeded: isHealthyBehaviorType(input.behaviorType)
+        ? input.healthyBehaviorSucceeded ?? true
+        : null,
       note: input.note?.trim() || null,
     })
     .select(BEHAVIOR_SELECT_COLUMNS)
     .single();
 
   if (error) {
+    if (error.code === "23505" && isHealthyBehaviorType(input.behaviorType)) {
+      throw new Error(`${getBehaviorTypeLabel(input.behaviorType)} is already logged for this day.`);
+    }
+
     throw new Error(error.message || "Could not save the behavior event.");
   }
 
@@ -85,7 +124,12 @@ export async function updateBehaviorEvent(
   supabase: SupabaseClient,
   input: BehaviorEntryInput & { eventId: string },
 ) {
-  const penaltyMinutes = computeBehaviorPenalty(input.behaviorType, input.durationMinutes ?? null);
+  const penaltyMinutes = computeBehaviorPenalty(
+    input.behaviorType,
+    input.durationMinutes ?? null,
+    input.occurredAt,
+    input.healthyBehaviorSucceeded,
+  );
   const durationMinutes =
     input.behaviorType === "exercise" || input.behaviorType === "screen_time"
       ? input.durationMinutes ?? null
@@ -98,6 +142,9 @@ export async function updateBehaviorEvent(
       occurred_at: input.occurredAt ?? undefined,
       duration_minutes: durationMinutes,
       penalty_minutes: penaltyMinutes,
+      healthy_behavior_succeeded: isHealthyBehaviorType(input.behaviorType)
+        ? input.healthyBehaviorSucceeded ?? true
+        : null,
       note: input.note?.trim() || null,
     })
     .eq("id", input.eventId)
@@ -106,6 +153,10 @@ export async function updateBehaviorEvent(
     .single();
 
   if (error) {
+    if (error.code === "23505" && isHealthyBehaviorType(input.behaviorType)) {
+      throw new Error(`${getBehaviorTypeLabel(input.behaviorType)} is already logged for this day.`);
+    }
+
     throw new Error(error.message || "Could not update the behavior event.");
   }
 
@@ -142,11 +193,21 @@ export async function fetchBehaviorEvents(supabase: SupabaseClient, userId: stri
   return (data ?? []) as unknown as BehaviorEvent[];
 }
 
-// Net reward-minutes contributed by behavior events: exercise adds minutes, penalties subtract.
+export function isHealthyBehaviorSuccess(event: BehaviorEvent) {
+  return isHealthyBehaviorType(event.behavior_type) && event.healthy_behavior_succeeded !== false;
+}
+
+// Net reward-minutes contributed by behavior events: positive behaviors add, penalties subtract.
 export function getBehaviorRewardDeltaMinutes(events: BehaviorEvent[]) {
   return events.reduce((total, event) => {
     if (event.behavior_type === "exercise") {
       return total + (event.duration_minutes ?? 0);
+    }
+
+    if (isHealthyBehaviorType(event.behavior_type)) {
+      return total + (isHealthyBehaviorSuccess(event)
+        ? HEALTHY_BEHAVIOR_REWARD_MINUTES
+        : -HEALTHY_BEHAVIOR_REWARD_MINUTES);
     }
 
     return total - (event.penalty_minutes ?? 0);
@@ -155,7 +216,7 @@ export function getBehaviorRewardDeltaMinutes(events: BehaviorEvent[]) {
 
 export function getBehaviorPenaltyMinutes(events: BehaviorEvent[]) {
   return events.reduce((total, event) => {
-    if (event.behavior_type === "exercise") {
+    if (event.behavior_type === "exercise" || isHealthyBehaviorSuccess(event)) {
       return total;
     }
 
@@ -163,8 +224,14 @@ export function getBehaviorPenaltyMinutes(events: BehaviorEvent[]) {
   }, 0);
 }
 
-export function getBehaviorExerciseMinutes(events: BehaviorEvent[]) {
+export function getPositiveBehaviorRewardMinutes(events: BehaviorEvent[]) {
   return events.reduce((total, event) => {
-    return event.behavior_type === "exercise" ? total + (event.duration_minutes ?? 0) : total;
+    if (event.behavior_type === "exercise") {
+      return total + (event.duration_minutes ?? 0);
+    }
+
+    return isHealthyBehaviorSuccess(event)
+      ? total + HEALTHY_BEHAVIOR_REWARD_MINUTES
+      : total;
   }, 0);
 }

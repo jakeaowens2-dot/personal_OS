@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { taskRevisionSummary } from "./proposal-presentation";
 import { buildPlanningContextPacket } from "../planning";
+import { fetchTaskLibraryReview } from "../task-library";
 import {
   ASSISTANT_TIME_ZONE,
   localDate,
@@ -20,6 +21,8 @@ export async function loadAssistantState(
   extraDate?: string,
   includeTaskHistory = true,
 ): Promise<AssistantState> {
+  const recovery = await client.rpc("assistant_reconcile_turns");
+  if (recovery.error) throw new Error(`Assistant recovery unavailable: ${recovery.error.message}`);
   const today = localDate();
   const previous = await client
     .from("assistant_messages")
@@ -165,6 +168,7 @@ export async function buildAssistantContext(
   userId: string,
   turnId: string,
   reviewDate?: string,
+  includeTaskLibraryReview = false,
 ) {
   const state = await loadAssistantState(
     client,
@@ -216,6 +220,12 @@ export async function buildAssistantContext(
   const dailyDates = new Set(
     [state.today, state.lastActiveDate, reviewDate].filter(Boolean),
   );
+  const taskLibraryReview = includeTaskLibraryReview
+    ? await fetchTaskLibraryReview(client, userId, [
+        ...planning.todayFocus.map((item) => item.taskId),
+        ...state.proposals.filter((p) => p.status === "pending").flatMap((p) => p.task_id ? [p.task_id] : []),
+      ]).catch((error: unknown) => ({ available: false, error: error instanceof Error ? error.message : "Task library review unavailable." }))
+    : undefined;
   return {
     schemaVersion: 1,
     date: state.today,
@@ -236,6 +246,7 @@ export async function buildAssistantContext(
     ),
     tasks: tasks.data?.slice(0, 60),
     tasksHaveMore: (tasks.data?.length ?? 0) > 60,
+    ...(taskLibraryReview ? { taskLibraryReview } : {}),
     planning,
     pendingProposals: state.proposals.filter((p) => p.status === "pending").map((p) => ({ ...p, task_history: undefined })),
     recentProposalOutcomes: proposalOutcomes.data ?? [],

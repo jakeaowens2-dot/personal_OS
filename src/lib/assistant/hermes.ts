@@ -12,6 +12,12 @@ export type HermesResult = {
   reviewed?: boolean;
   connection: { auth: "chatgpt"; model: string; runtime: "hermes" };
 };
+export const HERMES_BUDGETS = {
+  run_seconds: 160,
+  compression_idle_seconds: 30,
+  compression_total_seconds: 60,
+};
+const HERMES_HOST_TIMEOUT_MS = 180_000;
 export function hermesPaths(userId: string) {
   uuid(userId);
   const install =
@@ -89,7 +95,7 @@ export async function runHermes(options: {
   const timeout = setTimeout(
     () =>
       stop("Hermes timed out. Saved state is preserved; retry this message."),
-    180_000,
+    HERMES_HOST_TIMEOUT_MS,
   );
   options.signal?.addEventListener("abort", onAbort, { once: true });
   if (options.signal?.aborted) onAbort();
@@ -120,6 +126,13 @@ export async function runHermes(options: {
             "The application tool connection failed. Saved state is preserved.",
           ),
         );
+    } else if (event.type === "progress") {
+      const keys = ["history_messages", "snapshots_projected", "history_chars_before", "history_chars_after"] as const;
+      if (event.stage !== "context_ready" || keys.some((key) =>
+        typeof event[key] !== "number" || !Number.isSafeInteger(event[key]) || (event[key] as number) < 0))
+        return stop("Hermes returned invalid progress metadata.");
+      // Content-free diagnostics only; never log prompts, source text or auth.
+      console.info("Hermes replay prepared", Object.fromEntries(keys.map((key) => [key, event[key]])));
     } else if (event.type === "done") {
       if (
         !event.connection ||
@@ -141,6 +154,7 @@ export async function runHermes(options: {
       JSON.stringify({
         check: !options.prompt,
         model,
+        budgets: HERMES_BUDGETS,
         sessionId: options.sessionId,
         turnId: options.turnId,
         tools: PLANNING_TOOLS,

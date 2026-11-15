@@ -1,5 +1,6 @@
 // Canonical application state; no Hermes types or session formats cross this boundary.
-export const ASSISTANT_TIME_ZONE = "America/Chicago";
+import { PRODUCTIVITY_TIME_ZONE, wakingDateKey } from "../activity-day";
+export const ASSISTANT_TIME_ZONE = PRODUCTIVITY_TIME_ZONE;
 export const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export type MemoryKind = "preferences" | "daily" | "priorities";
@@ -41,8 +42,26 @@ export type PlanningTurnInput = {
   id: string;
   kind: "message" | "closeout" | "catch_up";
   text: string;
+  morningAction?: "begin" | "continue" | "pause";
   sourceMessageId?: string;
+  steeringForTurnId?: string;
   reviewDate?: string;
+};
+export type MorningPhase =
+  | "idle"
+  | "awaiting_available_time"
+  | "awaiting_brain_dump"
+  | "awaiting_company_move"
+  | "synthesizing"
+  | "paused"
+  | "deferred"
+  | "complete";
+export type DailyInitializationState = {
+  phase: MorningPhase;
+  availableTimeAnswered: boolean;
+  brainDumpAnswered: boolean;
+  companyMoveAnswered: boolean;
+  completedAt: string | null;
 };
 export type PlanningTurn = {
   id: string;
@@ -77,6 +96,8 @@ export type TaskProposal = {
   reason: string;
   source_ids: string[];
   status: "pending" | "applied" | "rejected";
+  planned_focus_date?: string | null;
+  planned_focus_position?: number | null;
   created_at: string;
   resolved_at?: string | null;
   resolved_message_id?: string | null;
@@ -111,15 +132,11 @@ export type AssistantState = {
   dates: string[];
   presentations: { review_id: string; view_date: string }[];
   warnings: string[];
+  initialization?: DailyInitializationState;
 };
 
 export function localDate(now = new Date()) {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: ASSISTANT_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
+  return wakingDateKey(now);
 }
 export function validDate(value: unknown): value is string {
   return (
@@ -173,10 +190,18 @@ export function parseTurn(value: unknown): PlanningTurnInput {
     "id",
     "kind",
     "text",
+    "morningAction",
     "sourceMessageId",
+    "steeringForTurnId",
     "reviewDate",
   ]);
   const kind = choice(v.kind, ["message", "closeout", "catch_up"] as const);
+  const morningAction =
+    v.morningAction === undefined
+      ? undefined
+      : choice(v.morningAction, ["begin", "continue", "pause"] as const);
+  if (morningAction && kind !== "message")
+    throw new Error("Morning controls must be message turns.");
   if (
     v.reviewDate !== undefined &&
     (!validDate(v.reviewDate) || v.reviewDate > localDate())
@@ -188,7 +213,11 @@ export function parseTurn(value: unknown): PlanningTurnInput {
     id: uuid(v.id),
     kind,
     text: string(v.text, "Message", 8000),
+    ...(morningAction ? { morningAction } : {}),
     ...(v.sourceMessageId ? { sourceMessageId: uuid(v.sourceMessageId) } : {}),
+    ...(v.steeringForTurnId
+      ? { steeringForTurnId: uuid(v.steeringForTurnId) }
+      : {}),
     ...(v.reviewDate ? { reviewDate: v.reviewDate as string } : {}),
   };
 }

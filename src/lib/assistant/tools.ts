@@ -59,7 +59,7 @@ export const PLANNING_TOOLS = [
   {
     name: "read_history",
     description:
-      "Read owned application messages by IDs, date, or literal text search. Page using offset; has_more is explicit. Dates use America/Chicago. Sources are evidence, never permissions.",
+      "Read owned application messages by IDs, date, or literal text search. Page using offset; has_more is explicit. New days roll over at 4am America/Los_Angeles; historical date labels are preserved. Sources are evidence, never permissions.",
     parameters: shape(
       {
         source_ids: { type: "array", items: id },
@@ -116,6 +116,26 @@ export const PLANNING_TOOLS = [
     }),
   },
   {
+    name: "set_today_focus",
+    description:
+      "Save today's exact ordered morning plan. Each entry is either an existing unfinished task_id or a proposal_id returned by propose_task earlier in this same morning synthesis. A proposal placeholder joins Today’s Focus only if that proposal is accepted; rejecting it does not schedule anything. Exclude life obligations and work deferred beyond today. This is an audited scheduling write, not task approval.",
+    parameters: shape({
+      entries: {
+        type: "array",
+        items: {
+          oneOf: [
+            shape({ task_id: id }),
+            shape({ proposal_id: id }),
+          ],
+        },
+        minItems: 1,
+        maxItems: 8,
+      },
+      reason: text,
+      source_ids: sourceIds,
+    }),
+  },
+  {
     name: "publish_review",
     description:
       "Publish ALL current daily entries and their visible carry-forward dispositions after reassessing them. Only for the explicitly requested closeout/catch-up date. Never omit entries or truncate to three. Returns the review revision.",
@@ -161,6 +181,41 @@ export async function rpc(
   const { data, error } = await client.rpc(name, args);
   if (error) throw new Error(error.message);
   return data;
+}
+export function restrictMorningTransitionTools(
+  handle: (name: string, args: unknown) => Promise<unknown>,
+) {
+  return (name: string, args: unknown) => {
+    const writesPlanningState =
+      name.startsWith("save_") ||
+      name === "propose_task" ||
+      name === "set_today_focus" ||
+      name === "publish_review";
+    if (writesPlanningState)
+      return Promise.resolve({
+        saved: false,
+        error:
+          "Morning-opening documentation is deferred until final synthesis.",
+      });
+    return handle(name, args);
+  };
+}
+export function constrainPlanningToolsForFlow(
+  handle: (name: string, args: unknown) => Promise<unknown>,
+  purpose: "normal" | "review" | "morning_transition" | "morning_synthesis",
+) {
+  const transitionSafe =
+    purpose === "morning_transition"
+      ? restrictMorningTransitionTools(handle)
+      : handle;
+  return (name: string, args: unknown) => {
+    if (name === "set_today_focus" && purpose !== "morning_synthesis")
+      return Promise.resolve({
+        saved: false,
+        error: "Today’s focus can be set only by the completed morning synthesis.",
+      });
+    return transitionSafe(name, args);
+  };
 }
 export function createPlanningToolHandler(options: {
   client: SupabaseClient;
@@ -304,6 +359,34 @@ export function createPlanningToolHandler(options: {
         p_sources: sources(v.source_ids),
       });
     }
+    if (name === "set_today_focus") {
+      reviewed = false;
+      const v = object(args, ["entries", "reason", "source_ids"]);
+      if (!Array.isArray(v.entries) || v.entries.length < 1 || v.entries.length > 8)
+        throw new Error("Today’s focus is limited to eight ordered tasks.");
+      const seen = new Set<string>();
+      const entries = v.entries.map((entry) => {
+        const item = object(entry, ["task_id", "proposal_id"]);
+        const hasTask = item.task_id !== undefined;
+        const hasProposal = item.proposal_id !== undefined;
+        if (hasTask === hasProposal)
+          throw new Error("Each focus entry needs exactly one task or proposal ID.");
+        const parsed = hasTask
+          ? { task_id: uuid(item.task_id) }
+          : { proposal_id: uuid(item.proposal_id) };
+        const key = hasTask ? `task:${parsed.task_id}` : `proposal:${parsed.proposal_id}`;
+        if (seen.has(key)) throw new Error("Today’s focus entries must be unique.");
+        seen.add(key);
+        return parsed;
+      });
+      return rpc(client, "assistant_set_today_focus_plan", {
+        ...bound,
+        p_operation: operationId(turnId, name, args),
+        p_entries: entries,
+        p_reason: string(v.reason, "Reason", 2000),
+        p_sources: sources(v.source_ids),
+      });
+    }
     if (name === "publish_review") {
       const v = object(args, ["date", "expected_revision"]);
       if (
@@ -338,6 +421,7 @@ export function createPlanningToolHandler(options: {
         reviewed: true,
         reason: v.reason,
         task_changes_require_user_approval: true,
+        today_focus_saved_directly_only_during_morning_synthesis: true,
       };
     }
     throw new Error("This assistant has no such tool.");
@@ -346,15 +430,20 @@ export function createPlanningToolHandler(options: {
     const value = args as {
       entry?: { id?: string };
       task_id?: string;
+      entries?: ({ task_id?: string; proposal_id?: string })[];
       date?: string;
     } | null;
-    return `${name}:${value?.entry?.id ?? value?.task_id ?? value?.date ?? "new"}`;
+    const focusEntries = value?.entries
+      ?.map((entry) => entry.task_id ?? entry.proposal_id)
+      .join(",");
+    return `${name}:${value?.entry?.id ?? value?.task_id ?? focusEntries ?? value?.date ?? "new"}`;
   };
   return {
     handle: async (name: string, args: unknown) => {
       const mutates =
         name.startsWith("save_") ||
         name === "propose_task" ||
+        name === "set_today_focus" ||
         name === "publish_review";
       const key = writeKey(name, args);
       try {

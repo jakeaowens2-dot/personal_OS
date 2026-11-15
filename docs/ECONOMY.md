@@ -1,5 +1,14 @@
 # Economy & Block Model
 
+## Waking-day attribution (2026-11-15)
+
+New work, ledger and behavior records persist an `activity_date` using a 4 a.m.
+America/Los_Angeles boundary. Real timestamps, session duration, attribution links,
+chronological settlement and weekend reward rates are unchanged. NULL on a legacy
+record retains its existing calendar-day grouping; no historical rows are backfilled.
+Changing an effective timestamp explicitly recomputes its day, while note/duration
+edits preserve the original timestamp and legacy/new day assignment.
+
 This document codifies the work/reward/penalty economy for the Productivity OS. It is the
 source of truth for how blocks are counted, rendered, and settled. Update it whenever the
 economy rules change, and keep `src/lib/economy.ts` in lockstep with it.
@@ -25,14 +34,15 @@ the hour actually present).
 
 - **1 reward block = 60 minutes of reward time** (1 hour).
 - Reward earning rate (per work block, i.e. per 50 min of focused work):
-  - **Weekday: 20 reward minutes** per work block.
-  - **Weekend: 30 reward minutes** per work block (1.5x).
+  - **Weekday: 15 reward minutes** per work block.
+  - **Weekend: 22.5 reward minutes** per work block (1.5x).
 - `reward_minutes_earned = work_blocks × rate`.
+- This policy is effective September 5, 2026 at midnight Central time. Earlier work
+  retains the former 20-minute weekday / 30-minute weekend rate.
 
-Consequence: 1 full reward block (60 min) requires 3 work blocks on weekdays (3 × 20)
-or 2 work blocks on weekends (2 × 30). This is why work blocks must NOT render as full
-reward blocks — a single 50-min work block earns only ⅓ (weekday) or ½ (weekend) of a
-reward block.
+Consequence: 1 full reward block (60 min) requires 4 work blocks on weekdays. Weekend
+work earns the same reward 1.5 times faster. Work blocks must NOT render as full reward
+blocks — a single 50-minute work block earns ¼ of a weekday reward block.
 
 ## Long-flow (rolling) sessions
 
@@ -53,11 +63,20 @@ reward block.
 - Exercise is **1:1 positive reward**: X minutes of workout = +X reward minutes.
 - It renders as **periwinkle** blocks and is tracked separately from work reward.
 
+## Daily healthy behaviors
+
+- Healthy morning habits and drinking one gallon of water are each settled once per
+  day from an explicit Yes/No outcome.
+- **Yes** earns 30 reward minutes. **No** creates a 30-minute penalty.
+- Healthy entries saved before Yes/No outcomes existed retain their original positive
+  value, so the schema migration does not retroactively change their economics.
+- Healthy behavior reward uses the same periwinkle activity treatment as exercise.
+
 ## Penalties (indulgence + screen time)
 
 - Indulgent behavior: flat **−60 minutes** (1 penalty block).
-- Screen time: `penalty = max(0.5 × screen_minutes, screen_minutes − 60)`.
-  (60 → 30, 120 → 60, 150 → 90.)
+- Screen time is penalized **1:1** for events on or after the September 5, 2026 policy
+  rollout. Earlier recorded events retain the policy under which they occurred.
 - Penalties render as **purple** blocks and are a **senior claim** on reward: they are
   paid down before anything else.
 
@@ -78,6 +97,13 @@ Settlement resolves in strict priority order:
 
 Net balance = `credit − penalty − spent`.
 
+Explicit `correction` and `bonus` ledger events participate in settlement through a
+signed `metadata.reward_minutes_delta`. Positive values are reward credits; negative
+values are reward debits. Corrections preserve the original event history and must
+carry a human-readable reason rather than rewriting prior work or behavior records.
+If an adjustment is later found to have been applied twice, append an equal and
+opposite correction linked to the original event; do not delete either audit record.
+
 ### Reward-balance display
 
 - `positive > 0` → solid **blue** blocks (work reward) + **periwinkle** blocks (exercise).
@@ -92,17 +118,18 @@ Net balance = `credit − penalty − spent`.
 
 ### "Destroyed" reward blocks (weekly overview only)
 
-Reward that a penalty consumed is shown in the weekly overview as **destroyed reward
-blocks**: greyed-out blue fill, purple border, purple ✕ overlay. Amount =
-`min(weekly_penalty, weekly_reward_total)`.
+Reward that a penalty consumed is shown in the weekly overview by overlaying a purple
+border and ✕ directly on the reward block it wiped out. It does not create an additional
+block. Destruction is allocated within each day and capped at that day's earned reward.
 
 ## Weekly overview
 
-Three sections, each with a block count and a total-hours label:
+Three category rows share a seven-day column grid. Each day renders its blocks in a
+two-column reading order and shows a quiet daily time total beneath the group:
 
 - **Work** — red blocks; total work minutes (blocks = minutes / 50).
-- **Reward** — blue (work reward) + periwinkle (exercise) + destroyed (grey/✕) blocks;
-  shows `total:` and `net:` (net = total − penalty).
+- **Reward** — blue (work reward) + periwinkle (exercise), with destroyed reward marked
+  directly on the underlying block; net = total − penalty.
 - **Penalty** — purple blocks; total penalty minutes.
 
 ## Reference rates (constants in `src/lib/economy.ts`)
@@ -112,5 +139,9 @@ Three sections, each with a block count and a total-hours label:
 | `WORK_BLOCK_WORK_MINUTES` | 50 | focused minutes per work block |
 | `WORK_BLOCK_REST_MINUTES` | 10 | implied rest minutes per work block |
 | `REWARD_BLOCK_MINUTES` | 60 | reward minutes per reward block |
-| `WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK` | 20 | weekday reward rate |
-| `WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK` | 30 | weekend reward rate (1.5x) |
+| `HEALTHY_BEHAVIOR_REWARD_MINUTES` | 30 | reward or penalty per daily healthy outcome |
+| `ECONOMY_POLICY_V2_EFFECTIVE_AT` | 2026-09-05 midnight CT | new-policy boundary |
+| `LEGACY_WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK` | 20 | pre-rollout weekday rate |
+| `LEGACY_WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK` | 30 | pre-rollout weekend rate |
+| `WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK` | 15 | weekday reward rate |
+| `WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK` | 22.5 | weekend reward rate (1.5x) |

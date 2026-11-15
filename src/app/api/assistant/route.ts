@@ -4,11 +4,22 @@ import {
   MAX_REQUEST_BYTES,
 } from "@/lib/assistant/contracts";
 import { runHermes } from "@/lib/assistant/hermes";
+import { withAssistantRun } from "@/lib/assistant/turn-runtime";
+import { getAssistantCheckpointer } from "@/lib/assistant/checkpointer";
+import {
+  loadDailyInitialization,
+  runConversationGraph,
+  type AgentFlowContext,
+} from "@/lib/assistant/conversation-graph";
 import {
   buildAssistantContext,
   loadAssistantState,
 } from "@/lib/assistant/store";
-import { createPlanningToolHandler, rpc } from "@/lib/assistant/tools";
+import {
+  constrainPlanningToolsForFlow,
+  createPlanningToolHandler,
+  rpc,
+} from "@/lib/assistant/tools";
 import {
   localDate,
   object,
@@ -36,7 +47,23 @@ const errorResponse = (error: unknown, status = 503) =>
 async function session() {
   const client = await createSupabaseServerClient();
   const { data, error } = await client.auth.getUser();
-  return { client, user: error ? null : data.user };
+  const user = error || !data.user?.email || data.user.is_anonymous ? null : data.user;
+  return { client, user };
+}
+
+async function stateWithInitialization(
+  client: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  userId: string,
+  date?: string,
+) {
+  const state = await loadAssistantState(client, userId, date);
+  const checkpointer = await getAssistantCheckpointer();
+  state.initialization = await loadDailyInitialization({
+    checkpointer,
+    userId,
+    date: state.date,
+  });
+  return state;
 }
 
 export async function GET(request: Request) {
@@ -82,7 +109,7 @@ export async function GET(request: Request) {
     const date = url.searchParams.get("date") || localDate();
     if (!validDate(date) || date > localDate())
       return errorResponse(new Error("Invalid history date."), 400);
-    const state = await loadAssistantState(client, user.id, date);
+    const state = await stateWithInitialization(client, user.id, date);
     let connection;
     let runtimeError;
     if (url.searchParams.get("check") === "1") {
@@ -147,7 +174,7 @@ export async function POST(request: Request) {
         p_apply: body.apply,
       });
       return Response.json(
-        { proposal, state: await loadAssistantState(client, user.id) },
+        { proposal, state: await stateWithInitialization(client, user.id) },
         { headers },
       );
     }
@@ -164,84 +191,129 @@ export async function POST(request: Request) {
       return errorResponse(error, 400);
     }
     const { id, ...payload } = input;
-    const lease = randomUUID();
-    const turn = await rpc(client, "assistant_begin_turn", {
-      p_id: id,
-      p_input: payload,
-      p_lease: lease,
-    });
-    if (turn.status === "completed")
-      return Response.json(
-        { state: await loadAssistantState(client, user.id) },
-        { headers },
-      );
-    let finished = false;
-    try {
-      const { data: runtimeSession, error: sessionError } = await client
-        .from("assistant_sessions")
-        .select("runtime_session_id")
-        .eq("user_id", user.id)
-        .single();
-      if (sessionError) throw new Error(sessionError.message);
-      const context = () =>
-        buildAssistantContext(client, user.id, id, input.reviewDate);
-      const handler = createPlanningToolHandler({
-        client,
-        userId: user.id,
-        turnId: id,
-        leaseId: lease,
-        context,
-        reviewDate: input.reviewDate,
-        reviewOrigin:
-          input.kind === "message"
-            ? undefined
-            : input.kind === "closeout"
-              ? "closeout"
-              : "catch_up",
-      });
-      const result = await runHermes({
-        userId: user.id,
-        sessionId: runtimeSession.runtime_session_id,
-        turnId: id,
-        prompt: {
-          currentApplicationState: await context(),
-          request: payload,
-          sourceTurnId: id,
-        },
-        tool: handler.handle,
-        signal: request.signal,
-      });
-      await rpc(client, "assistant_finish_turn", {
-        p_turn: id,
+    return await withAssistantRun(user.id, input.kind, request.signal, async (signal) => {
+      const lease = randomUUID();
+      const turn = await rpc(client, "assistant_begin_turn", {
+        p_id: id,
+        p_input: payload,
         p_lease: lease,
-        p_answer: result.answer,
-        p_error: null,
-        p_reviewed: result.reviewed === true,
       });
-      finished = true;
-      return Response.json(
-        {
-          connection: result.connection,
-          state: await loadAssistantState(client, user.id),
-        },
-        { headers },
-      );
-    } catch (error) {
-      if (!finished) {
-        try {
-          await rpc(client, "assistant_finish_turn", {
-            p_turn: id,
-            p_lease: lease,
-            p_answer: null,
-            p_error: error instanceof Error ? error.message : "Reply failed",
-            p_reviewed: false,
-          });
-        } catch {
-          /* A lost lease must not clear a successor's turn. The next refresh shows durable state. */
+      if (turn.status === "completed")
+        return Response.json(
+          { state: await stateWithInitialization(client, user.id) },
+          { headers },
+        );
+      let finished = false;
+      let runningAgent: ReturnType<typeof runHermes> | undefined;
+      try {
+        const { data: runtimeSession, error: sessionError } = await client
+          .from("assistant_sessions")
+          .select("runtime_session_id")
+          .eq("user_id", user.id)
+          .single();
+        if (sessionError) throw new Error(sessionError.message);
+        const context = (includeTaskLibraryReview = false) =>
+          buildAssistantContext(client, user.id, id, input.reviewDate, includeTaskLibraryReview);
+        const handler = createPlanningToolHandler({
+          client,
+          userId: user.id,
+          turnId: id,
+          leaseId: lease,
+          context,
+          reviewDate: input.reviewDate,
+          reviewOrigin:
+            input.kind === "message"
+              ? undefined
+              : input.kind === "closeout"
+                ? "closeout"
+                : "catch_up",
+        });
+        const source = await client
+          .from("assistant_messages")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("turn_id", id)
+          .in("role", ["user", "system"])
+          .single();
+        if (source.error) throw new Error(source.error.message);
+        const checkpointer = await getAssistantCheckpointer();
+        const result = await runConversationGraph({
+          checkpointer,
+          userId: user.id,
+          date: turn.local_date,
+          event: {
+            turnId: id,
+            messageId: source.data.id,
+            ...payload,
+          },
+          dependencies: {
+            runAgent: async (event, flow: AgentFlowContext) => {
+              const tool = constrainPlanningToolsForFlow(
+                handler.handle,
+                flow.purpose,
+              );
+              const currentApplicationState = await context(flow.purpose === "morning_synthesis");
+              // Graph cancellation can return before an async node unwinds.
+              // Do not launch a late worker after its context read completes.
+              signal.throwIfAborted();
+              runningAgent = runHermes({
+                userId: user.id,
+                sessionId: runtimeSession.runtime_session_id,
+                turnId: event.turnId,
+                prompt: {
+                  currentApplicationState,
+                  request: payload,
+                  dailyInitialization: flow,
+                  sourceTurnId: event.turnId,
+                },
+                tool,
+                signal,
+              });
+              const agentResult = await runningAgent;
+              if (!agentResult.answer)
+                throw new Error("Hermes returned no assistant response.");
+              return {
+                answer: agentResult.answer,
+                reviewed: agentResult.reviewed === true,
+              };
+            },
+          },
+          signal,
+        });
+        await rpc(client, "assistant_finish_turn", {
+          p_turn: id,
+          p_lease: lease,
+          p_answer: result.answer,
+          p_error: null,
+          p_reviewed: result.reviewed === true,
+        });
+        finished = true;
+        return Response.json(
+          {
+            state: await stateWithInitialization(client, user.id),
+          },
+          { headers },
+        );
+      } catch (error) {
+        // Drain the actual child process, not merely the graph's abort race,
+        // before withAssistantRun admits another loop into the same profile.
+        await runningAgent?.catch(() => undefined);
+        if (!finished) {
+          try {
+            await rpc(client, "assistant_finish_turn", {
+              p_turn: id,
+              p_lease: lease,
+              p_answer: null,
+              p_error: error instanceof Error ? error.message : "Reply failed",
+              p_reviewed: false,
+            });
+          } catch {
+            /* A lost lease must not clear a successor's turn. The next refresh shows durable state. */
+          }
         }
+        throw error;
       }
-      throw error;
-    }
+    });
   } catch (error) {
     return errorResponse(error);
   }

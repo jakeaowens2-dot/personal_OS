@@ -6,6 +6,12 @@ import { TimerControls } from "@/components/timer/TimerControls";
 import { TimerModeTabs } from "@/components/timer/TimerModeTabs";
 import { formatTimeRemaining, getModeDurationSeconds, getModeLabel } from "@/lib/timer";
 import { timerPalette } from "@/lib/timerPalette";
+import {
+  advanceDurableTimerState,
+  parseDurableTimerState,
+  timerStorageKey,
+  type DurableTimerState,
+} from "@/lib/timerRuntime";
 import type { TimerMode } from "@/lib/types";
 
 export type TimerStatus = "idle" | "running" | "paused" | "complete" | "overage";
@@ -96,6 +102,7 @@ export type SessionEndInfo = {
 };
 
 type PomodoroTimerProps = {
+  userId: string;
   onComplete?: (completion: { completedAt: string; mode: TimerMode }) => void;
   onEndSession?: (session: SessionEndInfo) => void;
   onStateChange?: (state: { mode: TimerMode; status: TimerStatus }) => void;
@@ -103,6 +110,7 @@ type PomodoroTimerProps = {
 };
 
 export function PomodoroTimer({
+  userId,
   onComplete,
   onEndSession,
   onStateChange,
@@ -114,9 +122,11 @@ export function PomodoroTimer({
   const [overageSeconds, setOverageSeconds] = useState(0);
   const [breakDurationSeconds, setBreakDurationSeconds] = useState<number | null>(null);
   const [lastCompletedMode, setLastCompletedMode] = useState<TimerMode | null>(null);
+  const [timerHydrated, setTimerHydrated] = useState(false);
   const completionEmittedRef = useRef(false);
   const modeRef = useRef<TimerMode>(mode);
   const remainingSecondsRef = useRef(remainingSeconds);
+  const clockSavedAtRef = useRef(0);
   const handledBreakRequestToken = useRef<number | null>(null);
 
   const palette = timerPalette[mode];
@@ -136,59 +146,64 @@ export function PomodoroTimer({
     return Math.max(0, Math.min(100, (elapsed / totalSeconds) * 100));
   }, [remainingSeconds, totalSeconds, isOverage]);
 
-  const handleTick = useEffectEvent(() => {
-    const current = remainingSecondsRef.current;
+  const reconcileClock = useEffectEvent((now = Date.now()) => {
+    const currentState: DurableTimerState = {
+      version: 1,
+      mode,
+      status,
+      remainingSeconds,
+      overageSeconds,
+      breakDurationSeconds,
+      lastCompletedMode,
+      savedAt: clockSavedAtRef.current,
+    };
+    const nextState = advanceDurableTimerState(currentState, now);
 
-    if (current <= 1) {
-      if (completionEmittedRef.current) {
-        return;
+    clockSavedAtRef.current = nextState.savedAt;
+    modeRef.current = nextState.mode;
+    remainingSecondsRef.current = nextState.remainingSeconds;
+
+    if (nextState.remainingSeconds !== remainingSeconds) {
+      setRemainingSeconds(nextState.remainingSeconds);
+    }
+    if (nextState.overageSeconds !== overageSeconds) {
+      setOverageSeconds(nextState.overageSeconds);
+    }
+    if (nextState.lastCompletedMode !== lastCompletedMode) {
+      setLastCompletedMode(nextState.lastCompletedMode);
+    }
+    if (nextState.status !== status) {
+      completionEmittedRef.current =
+        nextState.status === "complete" || nextState.status === "overage";
+      setStatus(nextState.status);
+
+      if (nextState.status === "complete") {
+        onComplete?.({
+          completedAt: new Date(now).toISOString(),
+          mode: nextState.mode,
+        });
       }
-
-      completionEmittedRef.current = true;
-      remainingSecondsRef.current = 0;
-      setRemainingSeconds(0);
-
-      const completedMode = modeRef.current;
-      setLastCompletedMode(completedMode);
-
-      if (completedMode === "work") {
-        // Roll into overage instead of completing: chime, then count up.
-        setOverageSeconds(0);
-        setStatus("overage");
-      } else {
-        setStatus("complete");
-        onComplete?.({ completedAt: new Date().toISOString(), mode: completedMode });
-      }
-      return;
     }
 
-    const next = current - 1;
-    remainingSecondsRef.current = next;
-    setRemainingSeconds(next);
+    return nextState;
   });
 
   useEffect(() => {
-    if (status !== "running") {
+    if (status !== "running" && status !== "overage") {
       return;
     }
 
-    const intervalId = window.setInterval(() => {
-      handleTick();
-    }, 1000);
+    const refreshFromClock = () => reconcileClock();
+    refreshFromClock();
+    const intervalId = window.setInterval(refreshFromClock, 1000);
+    window.addEventListener("focus", refreshFromClock);
+    document.addEventListener("visibilitychange", refreshFromClock);
 
-    return () => window.clearInterval(intervalId);
-  }, [onComplete, status]);
-
-  useEffect(() => {
-    if (status !== "overage") {
-      return;
-    }
-
-    const intervalId = window.setInterval(() => {
-      setOverageSeconds((current) => current + 1);
-    }, 1000);
-
-    return () => window.clearInterval(intervalId);
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshFromClock);
+      document.removeEventListener("visibilitychange", refreshFromClock);
+    };
   }, [status]);
 
   useEffect(() => {
@@ -209,6 +224,7 @@ export function PomodoroTimer({
     setBreakDurationSeconds(seconds);
     setRemainingSeconds(seconds);
     remainingSecondsRef.current = seconds;
+    clockSavedAtRef.current = Date.now();
     setOverageSeconds(0);
     setStatus("idle");
     setLastCompletedMode(null);
@@ -223,8 +239,68 @@ export function PomodoroTimer({
   }, [mode]);
 
   useEffect(() => {
+    const restoreTimer = window.setTimeout(() => {
+      try {
+        const storedState = parseDurableTimerState(
+          localStorage.getItem(timerStorageKey(userId)),
+        );
+
+        if (storedState) {
+          const restoredState = advanceDurableTimerState(storedState);
+          completionEmittedRef.current =
+            restoredState.status === "complete" || restoredState.status === "overage";
+          modeRef.current = restoredState.mode;
+          remainingSecondsRef.current = restoredState.remainingSeconds;
+          clockSavedAtRef.current = restoredState.savedAt;
+          setMode(restoredState.mode);
+          setStatus(restoredState.status);
+          setRemainingSeconds(restoredState.remainingSeconds);
+          setOverageSeconds(restoredState.overageSeconds);
+          setBreakDurationSeconds(restoredState.breakDurationSeconds);
+          setLastCompletedMode(restoredState.lastCompletedMode);
+        }
+      } catch {
+        /* Start from a clean timer if local storage is unavailable. */
+      } finally {
+        setTimerHydrated(true);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(restoreTimer);
+  }, [userId]);
+
+  useEffect(() => {
     remainingSecondsRef.current = remainingSeconds;
-  }, [remainingSeconds]);
+
+    if (!timerHydrated) {
+      return;
+    }
+
+    try {
+      const snapshot: DurableTimerState = {
+        version: 1,
+        mode,
+        status,
+        remainingSeconds,
+        overageSeconds,
+        breakDurationSeconds,
+        lastCompletedMode,
+        savedAt: clockSavedAtRef.current,
+      };
+      localStorage.setItem(timerStorageKey(userId), JSON.stringify(snapshot));
+    } catch {
+      /* Timer continuity remains in memory if local storage is unavailable. */
+    }
+  }, [
+    breakDurationSeconds,
+    lastCompletedMode,
+    mode,
+    overageSeconds,
+    remainingSeconds,
+    status,
+    timerHydrated,
+    userId,
+  ]);
 
   useEffect(() => {
     if (status === "complete") {
@@ -250,35 +326,73 @@ export function PomodoroTimer({
   }, [status]);
 
   const handleModeChange = (nextMode: TimerMode) => {
+    const nextRemainingSeconds = getModeDurationSeconds(nextMode);
     completionEmittedRef.current = false;
     setMode(nextMode);
+    modeRef.current = nextMode;
     setBreakDurationSeconds(null);
-    setRemainingSeconds(getModeDurationSeconds(nextMode));
-    remainingSecondsRef.current = getModeDurationSeconds(nextMode);
+    setRemainingSeconds(nextRemainingSeconds);
+    remainingSecondsRef.current = nextRemainingSeconds;
+    clockSavedAtRef.current = Date.now();
     setOverageSeconds(0);
     setStatus("idle");
     setLastCompletedMode(null);
   };
 
   const handleStart = () => {
+    const nextRemainingSeconds =
+      remainingSeconds === 0 ? modeTotalSeconds : remainingSeconds;
     completionEmittedRef.current = false;
     if (remainingSeconds === 0) {
-      setRemainingSeconds(modeTotalSeconds);
-      remainingSecondsRef.current = modeTotalSeconds;
+      setRemainingSeconds(nextRemainingSeconds);
+      remainingSecondsRef.current = nextRemainingSeconds;
     }
 
+    clockSavedAtRef.current = Date.now();
     setStatus("running");
     setLastCompletedMode(null);
   };
 
   const handlePause = () => {
-    setStatus("paused");
+    const now = Date.now();
+    const reconciledState = advanceDurableTimerState({
+      version: 1,
+      mode,
+      status,
+      remainingSeconds,
+      overageSeconds,
+      breakDurationSeconds,
+      lastCompletedMode,
+      savedAt: clockSavedAtRef.current,
+    }, now);
+
+    clockSavedAtRef.current = reconciledState.savedAt;
+    remainingSecondsRef.current = reconciledState.remainingSeconds;
+    setRemainingSeconds(reconciledState.remainingSeconds);
+    setOverageSeconds(reconciledState.overageSeconds);
+    setLastCompletedMode(reconciledState.lastCompletedMode);
+
+    if (reconciledState.status === "running") {
+      setStatus("paused");
+    } else {
+      completionEmittedRef.current =
+        reconciledState.status === "complete" || reconciledState.status === "overage";
+      setStatus(reconciledState.status);
+
+      if (reconciledState.status === "complete") {
+        onComplete?.({
+          completedAt: new Date(now).toISOString(),
+          mode: reconciledState.mode,
+        });
+      }
+    }
   };
 
   const handleReset = () => {
     completionEmittedRef.current = false;
     setRemainingSeconds(modeTotalSeconds);
     remainingSecondsRef.current = modeTotalSeconds;
+    clockSavedAtRef.current = Date.now();
     setOverageSeconds(0);
     setStatus("idle");
     setLastCompletedMode(null);
@@ -297,6 +411,7 @@ export function PomodoroTimer({
     const resetSeconds = getModeDurationSeconds("work");
     setRemainingSeconds(resetSeconds);
     remainingSecondsRef.current = resetSeconds;
+    clockSavedAtRef.current = Date.now();
     setOverageSeconds(0);
     setStatus("idle");
     setLastCompletedMode(null);

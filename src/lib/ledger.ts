@@ -1,4 +1,5 @@
 import { getModeDurationMinutes } from "@/lib/timer";
+import { wakingDateKey } from "./activity-day";
 import { workBlockDeltaForDuration } from "@/lib/economy";
 import type { LedgerEvent, TimerMode, TimerSession, WorkBlock } from "@/lib/types";
 
@@ -29,6 +30,7 @@ export function dedupeLedgerEvents(ledgerEvents: LedgerEvent[]) {
       event.delta_work_blocks,
       event.delta_reward_blocks,
       typeof metadata.reward_name === "string" ? metadata.reward_name : "",
+      typeof metadata.reward_minutes_delta === "number" ? metadata.reward_minutes_delta : "",
       typeof metadata.duration_minutes === "number" ? metadata.duration_minutes : "",
       typeof metadata.mode === "string" ? metadata.mode : "",
     ].join("|");
@@ -70,6 +72,7 @@ export function createLocalCompletionArtifacts({
   };
 
   const workBlock: WorkBlock = {
+    activity_date: wakingDateKey(completedAt),
     id: crypto.randomUUID(),
     user_id: userId,
     timer_session_id: timerSession.id,
@@ -80,6 +83,7 @@ export function createLocalCompletionArtifacts({
   };
 
   const ledgerEvent: LedgerEvent = {
+    activity_date: workBlock.activity_date,
     id: crypto.randomUUID(),
     user_id: userId,
     event_type: "work_earned",
