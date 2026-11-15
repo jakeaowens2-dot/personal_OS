@@ -19,6 +19,7 @@ const LEDGER_COLUMNS = [
   "source",
   "metadata",
   "created_at",
+  "activity_date",
 ].join(", ");
 
 const BEHAVIOR_COLUMNS = [
@@ -26,6 +27,7 @@ const BEHAVIOR_COLUMNS = [
   "user_id",
   "behavior_type",
   "occurred_at",
+  "activity_date",
   "duration_minutes",
   "penalty_minutes",
   "healthy_behavior_succeeded",

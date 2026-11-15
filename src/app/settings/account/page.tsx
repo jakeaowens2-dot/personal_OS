@@ -3,24 +3,35 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/Button";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { createSupabaseBrowserClient, createSupabaseRecoveryClient } from "@/lib/supabase/client";
 
 export default function AccountPage() {
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
+  const recoveryClient = useMemo(() => createSupabaseRecoveryClient(), []);
   const [ready, setReady] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmation, setConfirmation] = useState("");
   const [busy, setBusy] = useState(false);
+  const [anonymousSession, setAnonymousSession] = useState(false);
+  const [recoverySession, setRecoverySession] = useState(false);
   const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
 
   useEffect(() => {
     if (!supabase) return;
-    // Subscription also handles the recovery session established by a redirect.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUserId(session?.user.id ?? null);
-      if (session?.user.email) setEmail(session.user.email);
+    const search = new URLSearchParams(window.location.search);
+    const hash = new URLSearchParams(window.location.hash.slice(1));
+    const callbackError = search.get("recovery_error") || search.get("error_description") || hash.get("error_description");
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (callbackError) {
+        setNotice({ error: true, text: `Password recovery failed: ${callbackError}` });
+      }
+      const accountUser = session?.user.email && !session.user.is_anonymous ? session.user : null;
+      setAnonymousSession(Boolean(session?.user.is_anonymous));
+      setRecoverySession(event === "PASSWORD_RECOVERY");
+      setUserId(accountUser?.id ?? null);
+      if (accountUser?.email) setEmail(accountUser.email);
       setPassword("");
       setConfirmation("");
       setReady(true);
@@ -40,9 +51,15 @@ export default function AccountPage() {
         setPassword(""); setConfirmation("");
         setNotice({ error: false, text: "Password saved. You can now sign in with your email and password." });
       } else {
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/settings/account` });
+        if (!recoveryClient) throw new Error("Password recovery is not configured.");
+        if (anonymousSession) {
+          const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
+          if (signOutError) throw signOutError;
+          setAnonymousSession(false);
+        }
+        const { error } = await recoveryClient.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/settings/account` });
         if (error) throw error;
-        setNotice({ error: false, text: "If that account exists, check its email for a password setup link. Open it in this browser." });
+        setNotice({ error: false, text: "If that account exists, check its email for a password setup link. The link may open in your normal browser." });
       }
     } catch (error) {
       setNotice({ error: true, text: error instanceof Error ? error.message : "Could not update account access." });
@@ -53,8 +70,11 @@ export default function AccountPage() {
     <Link href="/" className="text-sm text-slate-600 underline underline-offset-4">Home</Link>
     <h1 className="text-2xl font-semibold">Account password</h1>
     {!supabase ? <p role="alert">Supabase connection is not configured.</p> : !ready ? <p>Checking your session…</p> : <>
-      <p className="text-sm text-slate-600">{userId ? `Set or change the password for ${email}.` : "Already have an account? Request a one-time link to set or reset its password, or sign in first to change it here."}</p>
-      {!userId ? <p className="text-sm text-slate-600">This one-time email is subject to Supabase’s email limit. Regular password sign-in does not send email.</p> : null}
+      <p className="text-sm text-slate-600">{userId ? `${recoverySession ? "Reset" : "Set or change"} the password for ${email}.` : "Already have an account? Request a one-time link to set or reset its password, or sign in first to change it here."}</p>
+      {!userId ? <div className="space-y-3 text-sm text-slate-600">
+        {anonymousSession ? <p role="status">An old anonymous session is present in this browser. It cannot own a password and will be cleared before recovery begins.</p> : null}
+        <p>Request the email below. Its link can safely open in your normal browser even when requested from the installed app. This one-time email is subject to Supabase’s email limit.</p>
+      </div> : null}
       <form className="grid gap-4 border-t border-slate-300 pt-5" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
         {userId ? <>
           <label className="grid gap-2 text-sm">New password<input name="new-password" className="rounded-lg border border-slate-300 p-3" type="password" autoComplete="new-password" required minLength={8} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
@@ -64,7 +84,7 @@ export default function AccountPage() {
         <Button type="submit" disabled={busy} variant="secondary">{busy ? "Working…" : userId ? "Save password" : "Email password setup link"}</Button>
       </form>
       {notice ? <p role={notice.error ? "alert" : "status"} className={`text-sm ${notice.error ? "text-rose-700" : "text-slate-600"}`}>{notice.text}</p> : null}
-      {notice && !notice.error && userId ? <Link href="/" className="text-sm underline underline-offset-4">Return to workspace</Link> : null}
+      {notice && !notice.error && userId ? <Link href="/assistant" className="text-sm underline underline-offset-4">Open assistant</Link> : null}
     </>}
   </main>;
 }

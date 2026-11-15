@@ -46,6 +46,10 @@ function getEventDisplayType(event: LedgerEvent) {
 }
 
 function getEventTitle(event: LedgerEvent) {
+  if (event.event_type === "correction") {
+    return typeof event.metadata?.reason === "string" ? event.metadata.reason : "Balance correction";
+  }
+
   if (event.event_type === "reward_spent") {
     const rewardName =
       typeof event.metadata?.reward_name === "string" ? event.metadata.reward_name : null;
@@ -74,6 +78,14 @@ function getEventDetail(event: LedgerEvent) {
 }
 
 function getDeltaLabel(event: LedgerEvent) {
+  if (event.event_type === "correction" || event.event_type === "bonus") {
+    const correctionMinutes = event.metadata?.reward_minutes_delta;
+    if (typeof correctionMinutes === "number" && Number.isFinite(correctionMinutes)) {
+      const direction = correctionMinutes >= 0 ? "+" : "-";
+      return `${direction}${Math.abs(correctionMinutes)} min reward`;
+    }
+  }
+
   if (event.delta_work_blocks !== 0) {
     const count = Math.abs(event.delta_work_blocks);
     const direction = event.delta_work_blocks > 0 ? "+" : "-";
@@ -198,8 +210,6 @@ export function LedgerEventList({
         }
 
         const event = item.event;
-        const canEdit = Boolean(onRequestEdit && (showEditAction ? showEditAction(event) : true));
-        const canDelete = Boolean(onRequestDelete && (showDeleteAction ? showDeleteAction(event) : true));
 
         return (
           <article
@@ -224,12 +234,12 @@ export function LedgerEventList({
                 className="mt-1 h-3.5 w-3.5 rounded-[4px]"
                 style={{ backgroundColor: getDeltaSwatchColor(event) }}
               />
-              {canEdit || canDelete ? (
+              {onRequestEdit || onRequestDelete ? (
                 <PopoverMenu
                   buttonClassName="-mt-1 px-2 py-0.5 text-lg font-semibold leading-none text-slate-500 hover:text-slate-900"
                   label="⋯"
                 >
-                  {canEdit && onRequestEdit ? (
+                  {onRequestEdit && (showEditAction ? showEditAction(event) : true) ? (
                     <button
                       className="block w-full rounded-[0.6rem] px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/90 hover:text-slate-950"
                       onClick={() => onRequestEdit(event)}
@@ -238,7 +248,7 @@ export function LedgerEventList({
                       Edit
                     </button>
                   ) : null}
-                  {canDelete && onRequestDelete ? (
+                  {onRequestDelete && (showDeleteAction ? showDeleteAction(event) : true) ? (
                     <button
                       className="block w-full rounded-[0.6rem] px-3 py-2 text-left text-sm text-slate-600 transition hover:bg-slate-100/90 hover:text-slate-950"
                       onClick={() => onRequestDelete(event)}

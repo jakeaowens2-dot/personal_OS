@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { wakingDateKey } from "./activity-day";
 import type {
   DailyFocusItem,
   DailyFocusItemWithTask,
@@ -251,9 +252,7 @@ function sortDailyFocusItems(items: DailyFocusItemWithTask[]) {
 }
 
 function getTodayDateKey() {
-  const today = new Date();
-  const offsetDate = new Date(today.getTime() - today.getTimezoneOffset() * 60 * 1000);
-  return offsetDate.toISOString().slice(0, 10);
+  return wakingDateKey();
 }
 
 export async function fetchTasks(
@@ -261,23 +260,28 @@ export async function fetchTasks(
   userId: string,
   { includeArchived = true }: { includeArchived?: boolean } = {},
 ) {
-  let query = supabase
-    .from("tasks")
-    .select(TASK_SELECT_COLUMNS)
-    .eq("user_id", userId)
-    .order("updated_at", { ascending: false });
+  const rows: Task[] = [];
+  for (let offset = 0; ; offset += 1000) {
+    let query = supabase
+      .from("tasks")
+      .select(TASK_SELECT_COLUMNS)
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .order("id");
 
-  if (!includeArchived) {
-    query = query.neq("status", "archived");
+    if (!includeArchived) {
+      query = query.neq("status", "archived");
+    }
+
+    const { data, error } = await query.range(offset, offset + 999);
+
+    if (error) {
+      throw new Error(enhanceTaskStorageError(toErrorMessage(error, "Could not load tasks."), "task"));
+    }
+
+    rows.push(...((data ?? []) as unknown as Task[]));
+    if ((data?.length ?? 0) < 1000) return sortTasks(rows);
   }
-
-  const { data, error } = await query;
-
-  if (error) {
-    throw new Error(enhanceTaskStorageError(toErrorMessage(error, "Could not load tasks."), "task"));
-  }
-
-  return sortTasks((data ?? []) as unknown as Task[]);
 }
 
 export async function fetchTasksByIds(
@@ -509,6 +513,8 @@ export async function ensureHousekeepingTask(supabase: SupabaseClient, userId: s
     .select(TASK_SELECT_COLUMNS)
     .eq("user_id", userId)
     .eq("source", HOUSEKEEPING_TASK_SOURCE)
+    .order("created_at", { ascending: true })
+    .limit(1)
     .maybeSingle();
 
   if (error) {

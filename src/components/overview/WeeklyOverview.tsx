@@ -95,7 +95,7 @@ export function WeeklyOverview({ days }: WeeklyOverviewProps) {
         <CategoryRow label="Reward" totalMinutes={totals.rewardWork + totals.behaviorReward} withRule>
           {days.map((day) => {
             const destroyedWorkMinutes = Math.min(day.penaltyMinutes, day.rewardWorkMinutes);
-            const destroyedBehaviorRewardMinutes = Math.min(
+            const destroyedBehaviorMinutes = Math.min(
               Math.max(0, day.penaltyMinutes - destroyedWorkMinutes),
               day.behaviorRewardMinutes,
             );
@@ -113,7 +113,7 @@ export function WeeklyOverview({ days }: WeeklyOverviewProps) {
                   />
                   <MiniBlocks
                     color={exercisePalette.progress}
-                    destroyedMinutes={destroyedBehaviorRewardMinutes}
+                    destroyedMinutes={destroyedBehaviorMinutes}
                     layout="contents"
                     minutes={day.behaviorRewardMinutes}
                     minutesPerBlock={REWARD_BLOCK_MINUTES}

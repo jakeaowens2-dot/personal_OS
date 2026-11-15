@@ -3,10 +3,18 @@
 node_modules
 out
 coverage
+.build
 *.log
-tsconfig.tsbuildinfo
+*.tsbuildinfo
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+.local-backups/
+.vercel/
+# Private, one-off production data-repair receipts are not application source.
+scripts/merge-primary-anonymous-history.sql
+scripts/reconcile-20260928-balance.sql
+scripts/repair-20260927-morning-focus.sql
+scripts/repair-20260929-morning-focus.sql

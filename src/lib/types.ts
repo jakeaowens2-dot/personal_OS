@@ -16,6 +16,7 @@ export type TimerSession = {
 };
 
 export type WorkBlock = {
+  activity_date?: string | null;
   id: string;
   user_id: string;
   timer_session_id: string;
@@ -31,6 +32,7 @@ export type WorkBlock = {
 export type LedgerEventType = "work_earned" | "reward_spent" | "correction" | "bonus";
 
 export type LedgerEvent = {
+  activity_date?: string | null;
   id: string;
   user_id: string;
   event_type: LedgerEventType;
@@ -82,6 +84,7 @@ export type TaskAgentPayload = {
   constraints?: string[];
   decision_log?: string[];
   dependencies?: string[];
+  prerequisite_task_ids?: string[];
   objective?: string;
   open_questions?: string[];
   related_entities?: string[];
@@ -108,6 +111,48 @@ export type Task = {
   updated_by_actor_type: TaskActorType;
   updated_by_actor_label: string | null;
   last_change_reason: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectTrackerInputKind = "short_text" | "long_text" | "link" | "list";
+
+export type ProjectTracker = {
+  id: string;
+  user_id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ProjectTrackerItem = {
+  id: string;
+  tracker_id: string;
+  user_id: string;
+  phase: string;
+  position: number;
+  title: string;
+  description: string | null;
+  input_kind: ProjectTrackerInputKind;
+  input_label: string;
+  input_placeholder: string | null;
+  submission: string | null;
+  submitted_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PaperReadingEntry = {
+  id: string;
+  user_id: string;
+  title: string;
+  citation: string | null;
+  source_url: string | null;
+  completed_on: string;
+  notes: string;
   created_at: string;
   updated_at: string;
 };
@@ -180,6 +225,7 @@ export type HealthyBehaviorType = "waking_routine" | "gallon_water";
 export type BehaviorType = "indulgence" | "screen_time" | "exercise" | HealthyBehaviorType;
 
 export type BehaviorEvent = {
+  activity_date?: string | null;
   id: string;
   user_id: string;
   behavior_type: BehaviorType;

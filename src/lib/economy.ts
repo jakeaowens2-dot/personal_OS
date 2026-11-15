@@ -1,4 +1,5 @@
 import type { BehaviorEvent, LedgerEvent, WorkBlock } from "@/lib/types";
+import { calendarDateKey, recordDateKey } from "./activity-day";
 
 // ---------------------------------------------------------------------------
 // Canonical block-economy math. See docs/ECONOMY.md for the full model.
@@ -108,6 +109,16 @@ export function getSpentRewardMinutes(event: LedgerEvent) {
   return Math.abs(event.delta_reward_blocks) * REWARD_BLOCK_MINUTES;
 }
 
+export function getRewardCorrectionMinutes(event: LedgerEvent) {
+  const correctionMinutes = event.metadata?.reward_minutes_delta;
+
+  if (typeof correctionMinutes === "number" && Number.isFinite(correctionMinutes)) {
+    return correctionMinutes;
+  }
+
+  return event.delta_reward_blocks * REWARD_BLOCK_MINUTES;
+}
+
 export function sumSpentRewardMinutes(events: LedgerEvent[]) {
   return events.reduce(
     (total, event) =>
@@ -162,9 +173,14 @@ export function ledgerEventsToSettlementEvents(events: LedgerEvent[]): Settlemen
         minutes: getSpentRewardMinutes(event),
         at: event.created_at,
       });
+    } else if (event.event_type === "correction" || event.event_type === "bonus") {
+      const minutes = getRewardCorrectionMinutes(event);
+      result.push({
+        kind: minutes >= 0 ? "credit" : "spend",
+        minutes: Math.abs(minutes),
+        at: event.created_at,
+      });
     }
-    // "bonus" and "correction" events are intentionally excluded, matching the
-    // prior aggregate-only settlement.
   }
 
   return result;
@@ -185,10 +201,7 @@ export function behaviorEventsToSettlementEvents(events: BehaviorEvent[]): Settl
         minutes: HEALTHY_BEHAVIOR_REWARD_MINUTES,
         at: event.occurred_at,
       });
-    } else if (
-      event.behavior_type === "indulgence" ||
-      event.behavior_type === "screen_time"
-    ) {
+    } else {
       result.push({ kind: "penalty", minutes: event.penalty_minutes ?? 0, at: event.occurred_at });
     }
   }
@@ -276,13 +289,8 @@ export type WeeklyEconomyDay = {
   penaltyMinutes: number;
 };
 
-function isSameLocalDay(timestamp: string, date: Date) {
-  const value = new Date(timestamp);
-  return (
-    value.getFullYear() === date.getFullYear() &&
-    value.getMonth() === date.getMonth() &&
-    value.getDate() === date.getDate()
-  );
+function isSameLocalDay(timestamp: string, date: Date, activityDate?: string | null) {
+  return recordDateKey(timestamp, activityDate) === calendarDateKey(date);
 }
 
 export function buildWeeklyEconomyDays({
@@ -301,15 +309,15 @@ export function buildWeeklyEconomyDays({
     date.setDate(weekStart.getDate() + dayIndex);
 
     const dayLedgerEvents = ledgerEvents.filter(
-      (event) => event.event_type === "work_earned" && isSameLocalDay(event.created_at, date),
+      (event) => event.event_type === "work_earned" && isSameLocalDay(event.created_at, date, event.activity_date),
     );
-    const dayBehaviors = behaviorEvents.filter((event) => isSameLocalDay(event.occurred_at, date));
+    const dayBehaviors = behaviorEvents.filter((event) => isSameLocalDay(event.occurred_at, date, event.activity_date));
 
     return {
       date: date.toISOString(),
       dayLabel: new Intl.DateTimeFormat("en-US", { weekday: "short" }).format(date),
       workMinutes: workBlocks
-        .filter((workBlock) => isSameLocalDay(workBlock.earned_at, date))
+        .filter((workBlock) => isSameLocalDay(workBlock.earned_at, date, workBlock.activity_date))
         .reduce((total, workBlock) => total + workBlock.duration_minutes, 0),
       rewardWorkMinutes: dayLedgerEvents.reduce(
         (total, event) =>

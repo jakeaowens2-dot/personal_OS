@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import { WorkspaceHeader } from "@/components/workspace/WorkspaceHeader";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { EmailAuthPanel, type EmailAuthPanelState } from "@/components/auth/EmailAuthPanel";
 import { Badge } from "@/components/ui/Badge";
@@ -301,7 +301,7 @@ export default function TaskSettingsPage() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      const user = session?.user ?? null;
+      const user = session?.user?.email && !session.user.is_anonymous ? session.user : null;
 
       if (!user) {
         setWorkspaceUserId(null);
@@ -761,52 +761,16 @@ export default function TaskSettingsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,#fff8ef_0%,#f6f0e7_38%,#f2ebdf_100%)] px-6 py-10 sm:px-8">
-      <div className="mx-auto flex max-w-7xl flex-col gap-8">
-        <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-2">
-            <div className="flex items-center gap-3">
-              <Badge tone={pageState.kind === "error" ? "neutral" : "accent"}>{pageState.message}</Badge>
-              <button
-                className="text-sm text-slate-500 underline-offset-4 transition hover:text-slate-900 hover:underline"
-                onClick={() => setShowArchived((current) => !current)}
-                type="button"
-              >
-                {showArchived ? "Hide archived" : "Show archived"}
-              </button>
-            </div>
-            <p className="text-sm uppercase tracking-[0.18em] text-slate-500">Task settings</p>
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">Task vault</h1>
-          </div>
-
-          <div className="flex flex-col items-start gap-3 sm:items-end">
-            {workspaceUserEmail ? (
-              <p className="text-sm text-slate-500">
-                Logged in as: <span className="font-medium text-slate-900">{workspaceUserEmail}</span>
-              </p>
-            ) : null}
-            <div className="flex items-center gap-3">
-              <Button onClick={() => setIsCreateDialogOpen(true)} disabled={!workspaceUserId} size="sm">
-                New task
-              </Button>
-              <Link
-                className="text-sm text-slate-600 underline-offset-4 transition hover:text-slate-900 hover:underline"
-                href="/"
-              >
-                Back home
-              </Link>
-              {workspaceUserId ? (
-                <button
-                  className="text-sm text-slate-600 underline-offset-4 transition hover:text-slate-900 hover:underline"
-                  onClick={() => void handleSignOut()}
-                  type="button"
-                >
-                  Sign out
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </header>
+    <main className="min-h-screen bg-[var(--background)]">
+      <WorkspaceHeader email={workspaceUserEmail} status={pageState.message} onSignOut={() => void handleSignOut()} />
+      <div className="mx-auto flex max-w-6xl flex-col gap-8 px-6 py-8">
+        <h1 className="sr-only">Task Management</h1>
+        <div className="flex items-center justify-between gap-4">
+          <button className="text-sm text-slate-600 underline-offset-4 hover:underline" onClick={() => setShowArchived((current) => !current)} type="button">
+            {showArchived ? "Hide archived" : "Show archived"}
+          </button>
+          <Button onClick={() => setIsCreateDialogOpen(true)} disabled={!workspaceUserId} size="sm">New task</Button>
+        </div>
 
         {pageState.kind === "error" ? <p className="text-sm text-rose-700">{pageState.message}</p> : null}
 

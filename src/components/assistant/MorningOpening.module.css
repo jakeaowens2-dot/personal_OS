@@ -1,0 +1,110 @@
+.invitation {
+  margin: 1.5rem 0 0.5rem;
+  padding: 2.5rem 0;
+  text-align: center;
+}
+
+.invitation h2,
+.resume h2 {
+  margin-top: 0.45rem;
+  font-size: clamp(26px, 4vw, 34px);
+  font-weight: 500;
+  letter-spacing: -0.035em;
+}
+
+.invitation > p:not(.eyebrow),
+.resume > p:not(.eyebrow) {
+  max-width: 34rem;
+  margin: 0.8rem auto 0;
+  color: var(--muted);
+  font-size: 0.88rem;
+  line-height: 1.7;
+}
+
+.invitation button,
+.resume button {
+  margin-top: 1.35rem;
+  border-radius: 0.55rem;
+  padding: 0.65rem 1rem;
+  background: var(--accent);
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.resume,
+.progressPanel,
+.complete {
+  margin-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  padding: 1.15rem 0 0;
+}
+
+.resume h2 {
+  font-size: 1.2rem;
+}
+
+.resume > p:not(.eyebrow) {
+  margin-left: 0;
+}
+
+.progressPanel {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.progressPanel ol {
+  display: flex;
+  gap: 0.7rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.progressPanel li::before {
+  content: "○ ";
+}
+
+.progressPanel li[data-complete="true"]::before {
+  content: "✓ ";
+  color: var(--accent);
+}
+
+.progressPanel button,
+.complete summary {
+  color: var(--muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.status {
+  margin-top: 0.25rem;
+  font-size: 0.86rem;
+}
+
+.complete p {
+  margin-top: 0.6rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.6;
+}
+
+.eyebrow {
+  color: var(--accent);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media (max-width: 620px) {
+  .progressPanel {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .progressPanel ol {
+    flex-wrap: wrap;
+  }
+}

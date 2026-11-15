@@ -19,6 +19,7 @@ export function DayOffsetSelector({
       <span className="text-sm text-slate-600">{label}</span>
       <div className="flex items-center justify-between rounded-2xl border border-slate-300/80 bg-white/80 px-4 py-3">
         <Button
+          aria-label="Previous day"
           className="text-slate-500"
           disabled={disabled}
           onClick={() => onChange(value - 1)}
@@ -30,6 +31,7 @@ export function DayOffsetSelector({
         <span className="text-sm font-medium text-slate-900">{formatDayOffset(value)}</span>
         {value < 0 ? (
           <Button
+            aria-label="Next day"
             className="text-slate-500"
             disabled={disabled}
             onClick={() => onChange(Math.min(value + 1, 0))}

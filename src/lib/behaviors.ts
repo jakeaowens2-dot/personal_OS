@@ -15,6 +15,7 @@ const BEHAVIOR_SELECT_COLUMNS = [
   "user_id",
   "behavior_type",
   "occurred_at",
+  "activity_date",
   "duration_minutes",
   "penalty_minutes",
   "healthy_behavior_succeeded",

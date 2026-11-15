@@ -1,5 +1,14 @@
 # Economy & Block Model
 
+## Waking-day attribution (2026-11-15)
+
+New work, ledger and behavior records persist an `activity_date` using a 4 a.m.
+America/Los_Angeles boundary. Real timestamps, session duration, attribution links,
+chronological settlement and weekend reward rates are unchanged. NULL on a legacy
+record retains its existing calendar-day grouping; no historical rows are backfilled.
+Changing an effective timestamp explicitly recomputes its day, while note/duration
+edits preserve the original timestamp and legacy/new day assignment.
+
 This document codifies the work/reward/penalty economy for the Productivity OS. It is the
 source of truth for how blocks are counted, rendered, and settled. Update it whenever the
 economy rules change, and keep `src/lib/economy.ts` in lockstep with it.
@@ -54,12 +63,14 @@ blocks — a single 50-minute work block earns ¼ of a weekday reward block.
 - Exercise is **1:1 positive reward**: X minutes of workout = +X reward minutes.
 - It renders as **periwinkle** blocks and is tracked separately from work reward.
 
-## Healthy behaviors
+## Daily healthy behaviors
 
-- Healthy morning habits and one gallon of water each require a daily Yes/No result.
-- **Yes** earns **+30 reward minutes** and **No** creates a **−30 reward-minute penalty**.
-- The result is derived from each durable behavior event. Historic success-only entries remain Yes.
-- Successful healthy behavior renders in the periwinkle positive-behavior pool; failures render as penalties.
+- Healthy morning habits and drinking one gallon of water are each settled once per
+  day from an explicit Yes/No outcome.
+- **Yes** earns 30 reward minutes. **No** creates a 30-minute penalty.
+- Healthy entries saved before Yes/No outcomes existed retain their original positive
+  value, so the schema migration does not retroactively change their economics.
+- Healthy behavior reward uses the same periwinkle activity treatment as exercise.
 
 ## Penalties (indulgence + screen time)
 
@@ -73,7 +84,7 @@ blocks — a single 50-minute work block earns ¼ of a weekday reward block.
 
 Given, in minutes:
 
-- `credit` = work reward + exercise + healthy behavior bonuses (total positive reward earned)
+- `credit` = work reward + exercise  (total positive reward earned)
 - `penalty` = total penalty minutes
 - `spent` = total reward minutes redeemed
 
@@ -86,11 +97,17 @@ Settlement resolves in strict priority order:
 
 Net balance = `credit − penalty − spent`.
 
+Explicit `correction` and `bonus` ledger events participate in settlement through a
+signed `metadata.reward_minutes_delta`. Positive values are reward credits; negative
+values are reward debits. Corrections preserve the original event history and must
+carry a human-readable reason rather than rewriting prior work or behavior records.
+If an adjustment is later found to have been applied twice, append an equal and
+opposite correction linked to the original event; do not delete either audit record.
+
 ### Reward-balance display
 
-- `positive > 0` → solid **blue** blocks (work reward) + **periwinkle** blocks (exercise and
-  healthy behavior bonuses). Periwinkle is shown up to the positive-behavior contribution;
-  the remainder is blue.
+- `positive > 0` → solid **blue** blocks (work reward) + **periwinkle** blocks (exercise).
+  Periwinkle is shown up to the exercise contribution; the remainder is blue.
 - `penalty_remaining > 0` → **purple** blocks (partial). Purple blocks shrink as work
   arrives, because new reward fills the penalty first.
 - `debt > 0` → **blue dashed-outline** blocks (partial). Debt blocks shrink and disappear
@@ -111,8 +128,8 @@ Three category rows share a seven-day column grid. Each day renders its blocks i
 two-column reading order and shows a quiet daily time total beneath the group:
 
 - **Work** — red blocks; total work minutes (blocks = minutes / 50).
-- **Reward** — blue (work reward) + periwinkle (exercise and healthy behavior bonuses),
-  with destroyed reward marked directly on the underlying block; net = total − penalty.
+- **Reward** — blue (work reward) + periwinkle (exercise), with destroyed reward marked
+  directly on the underlying block; net = total − penalty.
 - **Penalty** — purple blocks; total penalty minutes.
 
 ## Reference rates (constants in `src/lib/economy.ts`)
@@ -122,7 +139,7 @@ two-column reading order and shows a quiet daily time total beneath the group:
 | `WORK_BLOCK_WORK_MINUTES` | 50 | focused minutes per work block |
 | `WORK_BLOCK_REST_MINUTES` | 10 | implied rest minutes per work block |
 | `REWARD_BLOCK_MINUTES` | 60 | reward minutes per reward block |
-| `HEALTHY_BEHAVIOR_REWARD_MINUTES` | 30 | reward minutes credited for Yes or penalized for No |
+| `HEALTHY_BEHAVIOR_REWARD_MINUTES` | 30 | reward or penalty per daily healthy outcome |
 | `ECONOMY_POLICY_V2_EFFECTIVE_AT` | 2026-09-05 midnight CT | new-policy boundary |
 | `LEGACY_WEEKDAY_REWARD_MINUTES_PER_WORK_BLOCK` | 20 | pre-rollout weekday rate |
 | `LEGACY_WEEKEND_REWARD_MINUTES_PER_WORK_BLOCK` | 30 | pre-rollout weekend rate |
